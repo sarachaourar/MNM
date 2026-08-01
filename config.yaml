@@ -1,0 +1,22 @@
+ports:
+  - "Tripoli"
+  - "Algiers"
+  -"Tunis"
+  -"Athens"
+  -"PortSaid"
+  -"Messina"
+  -"Algeciras"
+  -"Trieste"
+  -"Valencia"
+  -"Mersin"
+  -"Genoa"
+  -"Marseille"
+
+trading:
+  costs:
+    buy_cost: 5
+    shipping_cost: 1.5
+  revenue:
+    price: 10
+  stock:
+    max: 1000
