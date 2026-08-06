@@ -1,6 +1,7 @@
 import yaml
 import cmd
 import argparse
+from interfaceGPT2 import Interface
 
 ###############################################################################
 #
@@ -13,8 +14,10 @@ import argparse
 #
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', type=str, default='config.yml')
+parser.add_argument('--name', type=str, default='Player')
+parser.add_argument('--port', type=str, default='Tripoli')
 parser.add_argument('--gold', type=float, default=1500)
-parser.add_argument('--product', type=float, default=0)
+parser.add_argument('--goods', type=float, default=0)
 args = parser.parse_args()
 
 #
@@ -36,145 +39,63 @@ except OSError as e:
 #
 ###############################################################################
 
-class Port():
-    """
-    A Port allows to sell and purchase products.
-
-    Attributes
-    ----------
-    name : str
-        The name of the port
-    shipping_cost : float
-        the amount of gold required to bring the product from one port to another.
-
-    Methods
-    ----------
-    purchase_product(amount)
-        Buys product from the port.
-    sell_product(amount)
-        Sells product from the port.
-    """
-
-    def __init__(self, name, shipping_cost):
-        """ Initialises the Mine using a name and the shipping cost.
-
-        Parameters
-        ----------
-        name : str
-            The name of the port.
-        shipping_cost : float
-            The amount of gold required to bring the product from one port to another.
-        """
-
+class Port(abc.ABC):
+    def __init__(self, name, player):
         self.name = name
-        self.shipping_cost = shipping_cost
+        self.player =player
 
-    def purchase_product(self, amount):
+    def 
+
+class Stock(Port):
+    def __init__(self, gold, goods):
+        super().__init__(name, player)
+        self.gold = gold
+        self.goods = goods
+        self.MAX_STOCK = config["trading"]["stock"]["max"] 
+
+    def purchase_goods(self, amount):
         """Method to buy product
 
-        This method allows to buy a certain amount of products from a port.
+        This method allows to buy a certain amount of goods from another port-city.
 
         Parameters
         ----------
         amount : float
-            The amount of product that should be bought.
+            The amount of goods that should be bought.
 
         Returns
         -------
         float
-            The cost of the product that was purchased.
+            The cost of the goods that were purchased.
         """
 
         cost = amount * (config["trading"]["costs"]["buy_cost"] + self.shipping_cost)
-        return cost
+        return cost    
 
-    def sell_product(self, amount):
+    def send_goods(self, amount): 
+        #SARA's note
+        #This version does not take into account the fact that the sent 
+        #goods might not be purchased, all goods sent are purchased in this version.
         """Method to sell product
 
-        This method allows to sell a certain amount of product to a port.
+        This method allows to send a certain amount of goods to a port.
 
         Parameters
         ----------
         amount : float
-            The amount of product that should be sold.
+            The amount of goods that should be sent.
 
         Returns
         -------
         float
-            The revenue from the product that was sold.
+            The revenue from the goods that were sold.
         """
 
         revenue = amount * (config["trading"]["revenue"]["price"] - self.shipping_cost)
-        return revenue    
+        return revenue
 
-class Stock():
-    """
-    The Stock manages your product and gold
-
-    Attributes
-    ----------
-    gold : float
-        The amount of gold in the stock in kilogram.
-    salt : float
-        the amount of product in the stock in kilogram.
-    MAX_STOCK : float
-        the maximum amount of product in the stock in kilogram.
-
-    Methods
-    ----------
-    get_product()
-        Returns the amount of product in kilogram.
-    get_gold()
-        Returns the amount of gold in stock.
-    add_product(amount)
-        Adds products to the stock (in kilogram).
-    remove_product(amount)
-        Removes products from the stock (in kilogram).
-    add_gold(amont)
-        adds gold to the stock.
-    remove_gold(amount)
-        removes gold from the stock.
-    """
-
-    def __init__(self, gold, product):
-        """ Initialises the Stock using a default gold and product amount.
-
-        Parameters
-        ----------
-        gold : float
-            The initial amount of gold in the stock.
-        product : float
-            The initial amount of product in the stock (usually 0).
-        """
-
-        self.gold = gold
-        self.product = product
-        self.MAX_STOCK = config["trading"]["stock"]["max"]
-
-    def get_product(self):
-        """Returns the amount of product in stock in kilogram.
-
-        Returns
-        -------
-        float
-            The the amount of product currently in the stock (in kg).
-        """
-
-        return self.product
-
-    def get_gold(self):
-        """Returns the amount of gold in stock.
-
-        Returns
-        -------
-        float
-            The the amount of gold currently in the stock.
-        """
-
-        return self.gold
-
-    def add_product(self, amount):
-        """Method to add product to the stock.
+    def add_goods(self, amount):
+        """Method to add goods to the port.
 
         This method adds products to the stock if there is still enough space. If
         the amount exceeds the MAX_STOCK parameter, the product will be rejected.
@@ -185,12 +106,12 @@ class Stock():
             The amount of product that should be added.
         """
 
-        if (self.product + amount) > self.MAX_STOCK:
-            raise Exception(f"You are full! You have {self.product}kg of products and can not add another {amount}kg")
+        if (self.goods + amount) > self.MAX_STOCK:
+            raise Exception(f"You are full! You have {self.goods}kg of products and can not add another {amount}kg")
 
-        self.product += amount
+        self.goods += amount   
 
-    def remove_product(self, amount):
+    def remove_goods(self, amount):
         """Method to remove product from the stock.
 
         This method removes products from the stock if it is in there. If the amount
@@ -203,10 +124,10 @@ class Stock():
             The amount of products that should be removed.
         """
 
-        if amount > self.products:
-            raise Exception(f"You can't remove {amount}kg of products from your stock, you only have {self.product}kg")
+        if amount > self.goods:
+            raise Exception(f"You can't remove {amount}kg of products from your stock, you only have {self.goods}kg")
 
-        self.product -= amount
+        self.goods -= amount
 
     def add_gold(self, amount):
         """Method to add gold to the stock
@@ -230,69 +151,89 @@ class Stock():
 
         if amount > self.gold:
             raise Exception(f"Can not remove more gold than you currently have. You have {self.gold} gold")
-        self.gold -= amount
+        self.gold -= amount            
+
+class MNM(cmd.Cmd):
+    intro = """
+    Welcome to the Mediterranean Sea waters, governor!
+
+    You can see your stock by typing 'list_stock'. Type 'purchase <amount> <port>'
+    to purchase products from a port. For example: 'purchase 100 Algiers' to
+    purchase 100kg of products from the Algiers port. Type 'sell <amount> <port>'
+    to sell products to a port. For example: 'sell 100 Genoa' to sell 100kg
+    of products to Genoa.
+    """
+    prompt = "Maris Notris Mercatores> "
+
+    ports = {}
+
+    def __init__(self):
+        super().__init__()
+
+        self.player = Player(name = args.name, port = args.port)
+
+        for i, port in enumerate(config["ports"]):
+            self.ports[port] = (Port(port, gold = args.gold, goods = args.goods, shipping_cost = config["trading"]["costs"]["shipping_cost"]), "player" + str(i+1))
+        print(self.ports)
+        self.message = ""
+
+    def get_stats(self):
+        for port in self.ports:
+            return (
+                f"Port : {port}\n"
+                f"Gold : {self.ports[f"{port}"][0].get_gold():.1f}\n"
+                f"Goods: {self.ports[f"{port}"][0].get_goods()}\n\n"
+                f"Last message:\n"
+                f"{self.message}"
+            )                 
+
+    def do_player(self, line):
+
+        for port in self.ports:
+            print(self.ports)
+            name, port = line.split()
+
+        try:
+            player = Player(name, port)
+            self.message = (f"Player {player.name} chose the {player.port} port")
+        except Exception as e:
+            self.message = str(e)
+
+    def governor():
+        player.port 
+
+
+    def do_exit(self, _):
+        self.message = "Leaving game."
+        return True
 
 ###############################################################################
 #
-# Start of the program.
-# This is the heart of the mechanism.
+# Program
 #
 ###############################################################################
 
 if __name__ == "__main__":
 
-    class MarisNostriMercatores(cmd.Cmd):
-        intro = """
-        Welcome to the Mediterranean Sea waters, governor!
+    game = MNM()
 
-        You can see your stock by typing 'list_stock'. Type 'purchase <amount> <port>'
-        to purchase products from a port. For example: 'purchase 100 Algiers' to
-        purchase 100kg of products from the Algiers port. Type 'sell <amount> <port>'
-        to sell products to a port. For example: 'sell 100 Genoa' to sell 100kg
-        of products to Genoa.
-        """
-        prompt = "Maris Notris Mercatores> "
+    gui = Interface()
 
-        my_stock = Stock(gold = args.gold, product = args.product)
-        ports = {}
+    while gui.is_running():
 
-        def __init__(self):
-            super().__init__()
-            for port in config["ports"]:
-                self.ports[port] = Port(port, shipping_cost = config["trading"]["costs"]["shipping_cost"])
+        gui.set_stats(game.get_stats())
 
-        def do_list_stock(self, _):
-            "List your stock"
-            print(f"You have {self.my_stock.get_product()}kg of products and {self.my_stock.get_gold()} gold")
+        gui.draw()
 
-        def do_purchase(self, line):
-            "Purchase products from a port"
-            amount, port = line.split()
-            amount = int(amount)
+        command = gui.get_command()
 
-            try:
-                cost = self.ports[port].purchase_product(amount)
-                self.my_stock.remove_gold(cost)
-                self.my_stock.add_product(amount)
-                print(f"Purchased {amount}kg of products for {cost} gold.")
-            except Exception as e:
-                print(e)
+        if command is None:
+            continue
 
-        def do_sell(self, line):
-            "Sell products to a port"
-            amount, port = line.split()
-            amount = int(amount)
+        if game.onecmd(command):
+            break
 
-            try:
-                revenue = self.ports[port].sell_product(amount)
-                self.my_stock.remove_product(amount)
-                self.my_stock.add_gold(revenue)
-                print(f"Sold {amount}kg of products for {revenue} gold")
-            except Exception as e:
-                print(e)
+        # Reload the map every turn.
+        gui.set_map("assets/map.png")
 
-        def do_exit(self, _):
-            "Exit the game"
-            return True
-
-    MarisNostriMercatores().cmdloop()
+    gui.close()    
