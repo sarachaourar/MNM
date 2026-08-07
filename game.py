@@ -1,6 +1,7 @@
 import yaml
 import cmd
 import argparse
+import abc
 from interfaceGPT2 import Interface
 
 ###############################################################################
@@ -15,9 +16,8 @@ from interfaceGPT2 import Interface
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', type=str, default='config.yml')
 parser.add_argument('--name', type=str, default='Player')
-parser.add_argument('--port', type=str, default='Tripoli')
 parser.add_argument('--gold', type=float, default=1500)
-parser.add_argument('--goods', type=float, default=0)
+parser.add_argument('--goods', type=float, default=20)
 args = parser.parse_args()
 
 #
@@ -39,18 +39,22 @@ except OSError as e:
 #
 ###############################################################################
 
-class Port(abc.ABC):
+class Port():
     def __init__(self, name, player):
         self.name = name
-        self.player =player
+        self.player = player
 
-    def 
+    def does_something(self):
+        pass
 
-class Stock(Port):
+    def does_something(self):
+        pass
+
+class Stock():
     def __init__(self, gold, goods):
-        super().__init__(name, player)
         self.gold = gold
         self.goods = goods
+        self.shipping_cost = config["trading"]["costs"]["shipping_cost"]
         self.MAX_STOCK = config["trading"]["stock"]["max"] 
 
     def purchase_goods(self, amount):
@@ -69,8 +73,18 @@ class Stock(Port):
             The cost of the goods that were purchased.
         """
 
+
+        if (self.goods + amount) > self.MAX_STOCK:
+            raise Exception(f"You have to increase the stock! Your maximum capacity is {self.MAX_STOCK}, you have {self.goods}kg of goods and can not add another {amount}kg")
+        
         cost = amount * (config["trading"]["costs"]["buy_cost"] + self.shipping_cost)
-        return cost    
+
+        if (self.gold - cost) < 0:
+            raise Exception(f"You do not have enough gold! This transaction costs {cost}g")
+        
+        self.goods += amount       
+        self.gold -= cost
+        return f" You have purchased {amount}kg of goods for {cost}g"  
 
     def send_goods(self, amount): 
         #SARA's note
@@ -90,68 +104,16 @@ class Stock(Port):
         float
             The revenue from the goods that were sold.
         """
-
-        revenue = amount * (config["trading"]["revenue"]["price"] - self.shipping_cost)
-        return revenue
-
-    def add_goods(self, amount):
-        """Method to add goods to the port.
-
-        This method adds products to the stock if there is still enough space. If
-        the amount exceeds the MAX_STOCK parameter, the product will be rejected.
-
-        Parameters
-        ----------
-        amount : float
-            The amount of product that should be added.
-        """
-
-        if (self.goods + amount) > self.MAX_STOCK:
-            raise Exception(f"You are full! You have {self.goods}kg of products and can not add another {amount}kg")
-
-        self.goods += amount   
-
-    def remove_goods(self, amount):
-        """Method to remove product from the stock.
-
-        This method removes products from the stock if it is in there. If the amount
-        exceeds the current amount of products in stock, an exception will be
-        thrown.
-
-        Parameters
-        ----------
-        amount : float
-            The amount of products that should be removed.
-        """
-
         if amount > self.goods:
-            raise Exception(f"You can't remove {amount}kg of products from your stock, you only have {self.goods}kg")
+            raise Exception(f"You can't get {amount}kg of goods from this port, it only has {self.goods}kg")
 
         self.goods -= amount
 
-    def add_gold(self, amount):
-        """Method to add gold to the stock
-
-        Parameters
-        ----------
-        amount : float
-            The amount of gold that should be added.
-        """
-
+        revenue = amount * (config["trading"]["revenue"]["price"] - self.shipping_cost)
         self.gold += amount
+        return revenue  
 
-    def remove_gold(self, amount):
-        """Method to remove gold from the stock
-
-        Parameters
-        ----------
-        amount : float
-            The amount of gold that should be removed.
-        """
-
-        if amount > self.gold:
-            raise Exception(f"Can not remove more gold than you currently have. You have {self.gold} gold")
-        self.gold -= amount            
+           
 
 class MNM(cmd.Cmd):
     intro = """
@@ -169,23 +131,34 @@ class MNM(cmd.Cmd):
 
     def __init__(self):
         super().__init__()
+        player = "player"
 
-        self.player = Player(name = args.name, port = args.port)
-
-        for i, port in enumerate(config["ports"]):
-            self.ports[port] = (Port(port, gold = args.gold, goods = args.goods, shipping_cost = config["trading"]["costs"]["shipping_cost"]), "player" + str(i+1))
-        print(self.ports)
+        for port in config["ports"]:
+            self.ports[port] = (Port(port, player), Stock(gold = args.gold, goods = args.goods))
         self.message = ""
+
+    def current_player(self):
+        pass
 
     def get_stats(self):
         for port in self.ports:
             return (
                 f"Port : {port}\n"
-                f"Gold : {self.ports[f"{port}"][0].get_gold():.1f}\n"
-                f"Goods: {self.ports[f"{port}"][0].get_goods()}\n\n"
+                f"Gold : {self.ports[f"{port}"][1].gold:.1f}\n"
+                f"Goods: {self.ports[f"{port}"][1].goods}\n\n"
                 f"Last message:\n"
                 f"{self.message}"
             )                 
+
+    def do_trade(self, line):
+
+        
+        port1, amount, port2 = line.split()
+        amount = int(amount)
+        self.ports[port1][1].send_goods(amount)
+        self.ports[port2][1].purchase_goods(amount)
+        print(f'{port1} sold {amount}kg of goods to {port2}')
+
 
     def do_player(self, line):
 
@@ -201,6 +174,7 @@ class MNM(cmd.Cmd):
 
     def governor():
         player.port 
+        pass
 
 
     def do_exit(self, _):
