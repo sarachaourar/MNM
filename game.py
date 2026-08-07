@@ -126,15 +126,34 @@ class MNM(cmd.Cmd):
     of products to Genoa.
     """
     prompt = "Maris Notris Mercatores> "
-
     ports = {}
 
     def __init__(self):
         super().__init__()
-        player = "player"
 
-        for port in config["ports"]:
-            self.ports[port] = (Port(port, player), Stock(gold = args.gold, goods = args.goods))
+        players = []
+
+        while len(config["ports"]) != len(players):
+
+            print("Choose you port:")
+            player = input()
+            if player in config["ports"]:
+                print(f"You are playing as the the {player} port")
+                players.append(player)
+                i = config["ports"].index(player)
+                config["ports"][i]
+            else:
+                players.append("computer")
+                print("This port is not available...")
+                
+        for players in players:
+            for port in config["ports"]:
+                if port == player:
+                    self.ports[port] = (Port(port, player), Stock(gold = args.gold, goods = args.goods))
+                    print(self.ports)
+            else:
+                pass
+        print(self.ports)
         self.message = ""
 
     def current_player(self):
@@ -150,9 +169,13 @@ class MNM(cmd.Cmd):
                 f"{self.message}"
             )                 
 
-    def do_trade(self, line):
+    def list_players(self, line):
+        print("Choose your port:")
+        port = line()
+        print(port)
+        pass
 
-        
+    def do_trade(self, line):
         port1, amount, port2 = line.split()
         amount = int(amount)
         self.ports[port1][1].send_goods(amount)
