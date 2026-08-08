@@ -1,16 +1,8 @@
 ports:
-  - "Tripoli"
-  - "Algiers"
-  - "Tunis"
-  - "Athens"
-  - "PortSaid"
-  - "Messina"
-  - "Algeciras"
-  - "Trieste"
-  - "Valencia"
-  - "Mersin"
-  - "Genoa"
-  - "Marseille"
+  - "a"
+  - "s"
+  - "d"
+
 
 trading:
   costs:

@@ -127,37 +127,34 @@ class MNM(cmd.Cmd):
     """
     prompt = "Maris Notris Mercatores> "
     ports = {}
+    players = []
 
     def __init__(self):
         super().__init__()
+        available_ports = []
 
-        players = []
+        for port in config["ports"]:
+            available_ports.append(port)
 
-        while len(config["ports"]) != len(players):
-
+        while len(config["ports"]) != len(self.players):
             print("Choose you port:")
             player = input()
-            if player in config["ports"]:
+            if player in available_ports:
                 print(f"You are playing as the the {player} port")
-                players.append(player)
-                i = config["ports"].index(player)
-                config["ports"][i]
+                self.players.append(player)
+                i = available_ports.index(player)
+                available_ports.remove(available_ports[i])
+                print(available_ports)
             else:
-                players.append("computer")
-                print("This port is not available...")
-                
-        for players in players:
-            for port in config["ports"]:
-                if port == player:
-                    self.ports[port] = (Port(port, player), Stock(gold = args.gold, goods = args.goods))
-                    print(self.ports)
-            else:
-                pass
-        print(self.ports)
-        self.message = ""
+                print("This port is not available. Choose something else...")
 
-    def current_player(self):
-        pass
+        for port in config["ports"]:
+            for player in self.players:
+                if port == player:
+                    self.ports[port] = (Port(port, player), Stock(gold = args.gold, goods = args.goods))                
+                else:
+                    pass    
+        self.message = ""
 
     def get_stats(self):
         for port in self.ports:
@@ -169,36 +166,25 @@ class MNM(cmd.Cmd):
                 f"{self.message}"
             )                 
 
-    def list_players(self, line):
-        print("Choose your port:")
-        port = line()
-        print(port)
-        pass
 
     def do_trade(self, line):
-        port1, amount, port2 = line.split()
-        amount = int(amount)
-        self.ports[port1][1].send_goods(amount)
-        self.ports[port2][1].purchase_goods(amount)
-        print(f'{port1} sold {amount}kg of goods to {port2}')
-
-
-    def do_player(self, line):
-
-        for port in self.ports:
-            print(self.ports)
-            name, port = line.split()
-
         try:
-            player = Player(name, port)
-            self.message = (f"Player {player.name} chose the {player.port} port")
+            port1, amount, port2 = line.split()
+            if port1 != port2:
+                amount = int(amount)
+                self.ports[port1][1].send_goods(amount)
+                self.ports[port2][1].purchase_goods(amount)
+                self.message = f'{port1} sold {amount}kg of goods to {port2}'
+            else:
+                self.message = "You can't trade with yourself!"
         except Exception as e:
             self.message = str(e)
 
-    def governor():
-        player.port 
-        pass
-
+    def round(self, line):
+        t = [0, 1, 2]
+        for i in t:
+            print(f'Player{i+1} governing over {self.ports[self.players[i]][0].player} can make their move!')
+            do_trade(self, line)
 
     def do_exit(self, _):
         self.message = "Leaving game."
