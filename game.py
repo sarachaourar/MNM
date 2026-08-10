@@ -110,7 +110,7 @@ class Stock():
         self.goods -= amount
 
         revenue = amount * (config["trading"]["revenue"]["price"] - self.shipping_cost)
-        self.gold += amount
+        self.gold += revenue
         return revenue  
 
            
@@ -142,8 +142,7 @@ class MNM(cmd.Cmd):
             if player in available_ports:
                 print(f"You are playing as the the {player} port")
                 self.players.append(player)
-                i = available_ports.index(player)
-                available_ports.remove(available_ports[i])
+                available_ports.remove(player)
                 print(available_ports)
             else:
                 print("This port is not available. Choose something else...")
@@ -153,39 +152,39 @@ class MNM(cmd.Cmd):
                 if port == player:
                     self.ports[port] = (Port(port, player), Stock(gold = args.gold, goods = args.goods))                
                 else:
-                    pass    
-        self.message = ""
+                    pass
+        self.turn_index = 0 #AI used: round logic
+        self.message = ""   
 
     def get_stats(self):
-        for port in self.ports:
-            return (
-                f"Port : {port}\n"
-                f"Gold : {self.ports[f"{port}"][1].gold:.1f}\n"
-                f"Goods: {self.ports[f"{port}"][1].goods}\n\n"
-                f"Last message:\n"
-                f"{self.message}"
-            )                 
+        return (
+            f"Port : {self.ports[self.current_player][0].player}\n"
+            f"Gold : {self.ports[self.current_player][1].gold:.1f}\n"
+            f"Goods: {self.ports[self.current_player][1].goods}\n\n"
+            f"Last message:\n"
+            f"{self.message}"
+        )                 
 
+    def round(self, line):
+        self.current_player = self.players[self.turn_index % len(self.players)] #AI used: round logic
+        self.message = f'{line} \n Player{self.turn_index % len(self.players) + 1} governing over {self.ports[self.current_player][0].player} can make their move!'
 
     def do_trade(self, line):
         try:
-            port1, amount, port2 = line.split()
+            amount, port2 = line.split()
+            port1 = self.current_player
             if port1 != port2:
                 amount = int(amount)
                 self.ports[port1][1].send_goods(amount)
                 self.ports[port2][1].purchase_goods(amount)
-                self.message = f'{port1} sold {amount}kg of goods to {port2}'
+                trade_message = f'{port1} sold {amount}kg of goods to {port2}'
+                self.turn_index += 1
+                self.round(trade_message)
             else:
                 self.message = "You can't trade with yourself!"
         except Exception as e:
             self.message = str(e)
-
-    def round(self, line):
-        t = [0, 1, 2]
-        for i in t:
-            print(f'Player{i+1} governing over {self.ports[self.players[i]][0].player} can make their move!')
-            do_trade(self, line)
-
+            
     def do_exit(self, _):
         self.message = "Leaving game."
         return True
@@ -199,6 +198,8 @@ class MNM(cmd.Cmd):
 if __name__ == "__main__":
 
     game = MNM()
+
+    game.round("")    
 
     gui = Interface()
 
