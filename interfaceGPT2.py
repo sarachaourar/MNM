@@ -67,6 +67,8 @@ class Interface:
         )
 
         self.command = ""
+        
+        self.title = ""
 
         self.stats = ""
         
@@ -83,10 +85,11 @@ class Interface:
     def is_running(self):
         return self.running
 
-    def set_stats(self, text):
+    def set_stats(self, text, title=""):
         """Replace the statistics panel."""
 
         self.stats = text
+        self.title = self.big_font.render(title, True, self.TEXT_COLOUR)
 
     def set_map(self, map_path):
         """Load a new map image."""
@@ -217,10 +220,8 @@ class Interface:
             panel
         )
 
-        title = self.big_font.render("Player", True, self.TEXT_COLOUR)
-
         self.screen.blit(
-            title,
+            self.title,
             (panel.x + 15, panel.y + 15)
         )
 
