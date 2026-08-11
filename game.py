@@ -113,39 +113,17 @@ class Stock():
         self.gold += revenue
         return revenue  
 
-           
-
 class MNM(cmd.Cmd):
-    intro = """
-    Welcome to the Mediterranean Sea waters, governor!
-
-    You can see your stock by typing 'list_stock'. Type 'purchase <amount> <port>'
-    to purchase products from a port. For example: 'purchase 100 Algiers' to
-    purchase 100kg of products from the Algiers port. Type 'sell <amount> <port>'
-    to sell products to a port. For example: 'sell 100 Genoa' to sell 100kg
-    of products to Genoa.
-    """
-    prompt = "Maris Notris Mercatores> "
     ports = {}
     players = []
 
     def __init__(self):
         super().__init__()
-        available_ports = []
-
+        self.available_ports = []
+        self.message = 'Choose your port...'
+        
         for port in config["ports"]:
-            available_ports.append(port)
-
-        while len(config["ports"]) != len(self.players):
-            print("Choose you port:")
-            player = input()
-            if player in available_ports:
-                print(f"You are playing as the the {player} port")
-                self.players.append(player)
-                available_ports.remove(player)
-                print(available_ports)
-            else:
-                print("This port is not available. Choose something else...")
+            self.available_ports.append(port)
 
         for port in config["ports"]:
             for player in self.players:
@@ -155,7 +133,20 @@ class MNM(cmd.Cmd):
                     pass
         self.turn_index = 0 #AI used: round logic
         self.message = ""   
+        
+    def choose_port(self, player):
+        if player in self.available_ports:
+            self.message = f"You are playing as the the {player} port"
+            self.players.append(player)
+            self.available_ports.remove(player)
+            self.ports[player] = (Port(player, player), Stock(gold=args.gold, goods=args.goods))
+        else:
+            self.mesage = "This port is not available. Choose something else..."
 
+    def setup_complete(self):
+        self.message = f"Welcome to the Mediterranean waters, governors! \nYour goal is to become the most powerful trading hub in the Mediterranean! \nTo achieve this, you can trade goods with other cities using the command trade <amount> <port>. \nTo start the game, simply enter the name of one of the cities available on the map. \nAvailable ports : {self.available_ports}"
+        return len(self.players) == len(config["ports"])
+        
     def get_stats(self):
         return (
             f"Port : {self.ports[self.current_player][0].player}\n"
@@ -197,11 +188,23 @@ class MNM(cmd.Cmd):
 
 if __name__ == "__main__":
 
-    game = MNM()
-
-    game.round("")    
+    game = MNM()    
 
     gui = Interface()
+
+    while gui.is_running() and not game.setup_complete():
+
+        gui.set_stats(game.message)
+
+        gui.draw()
+
+        choice = gui.get_command()
+
+        if choice is None:
+            continue
+        game.choose_port(choice)
+
+    game.round("")
 
     while gui.is_running():
 
