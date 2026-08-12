@@ -1,6 +1,7 @@
 import yaml
 import cmd
 import argparse
+import random
 from shapely import Point
 from interfaceGPT2 import Interface
 
@@ -123,35 +124,73 @@ class Hinterland(): #to be replaced by a GDF
 class MNM(cmd.Cmd):
 
     ports = []
-    available_ports = []
+    remaining_ports = []
     player_count=0
-    turn_index = 0
+    turn_index = -1
 
     def __init__(self, n_players):
         super().__init__()
         self.n_players = n_players
         
         for port in config["ports"]:
-            self.available_ports.append(port)
-    
-    def choose_port(self, chosen_port):
-        if chosen_port in self.available_ports:
-            self.message = f"You are playing as the the {chosen_port} port\n"
+            self.remaining_ports.append(port)
             
-            self.ports.append(Port(chosen_port,
-                                   f"Player {self.player_count+1}",
-                                   args.gold,
-                                   parse_point(config["ports"][chosen_port]),
-                                   Hinterland(args.goods)
-                                   )
-                              )
+    def add_port_to_list(self, port_name, player_name):
+        """
+        Adds a port to the list
+        
+        It creates a Port object corresponding to the chosen port and adds it to the list of ports
+
+        Parameters
+        ----------
+        port_name : str
+            The name of the port to be added to the list
+            
+        player_name : str
+            The name of the player controlling this port
+        """
+        
+        self.ports.append(Port(port_name,
+                               player_name,
+                               args.gold,
+                               parse_point(config["ports"][port_name]),
+                               Hinterland(args.goods)
+                               )
+                          )
+
+    
+    def choose_port(self, chosen_port_name):
+        """
+        Function that allows players to pick their port
+        
+        It announces the player's selection, increases the player count
+        and removes the chosen port from the list of remaining ports
+
+        Parameters
+        ----------
+        chosen_port_name : str
+            Name of the port chosen by the player
+        """
+        
+        if chosen_port_name in self.remaining_ports:
+            player_name = f"Player {self.player_count+1}"
+            self.message = f"{player_name} is playing as the {chosen_port_name} port\n"
+            
+            self.add_port_to_list(chosen_port_name, player_name)
+            
             self.player_count+=1
-            self.available_ports.remove(chosen_port)
+            self.remaining_ports.remove(chosen_port_name)
             
         else:
             self.mesage = "This port is not available. Choose something else..."
 
     def get_stats(self):
+        """
+        Function that is used to transmit stats to the GUI
+        
+        It prints the desired stats
+        """
+        
         return (
             f"Port : {self.current_port.name}\n"
             f"Gold : {self.current_port.gold}\n"
@@ -161,10 +200,44 @@ class MNM(cmd.Cmd):
             f"{self.message}"
         )                 
 
-    def round(self, mess):
+    def round(self):
+        self.turn_index += 1
+        
         self.current_turn = self.turn_index % self.n_players
         self.current_port = self.ports[self.current_turn]
-        self.message = mess
+        
+        if self.turn_index!=0 and self.current_turn==0:
+            #Computer time!!!
+            computer_messages = self.message
+            for computer_port_name in self.remaining_ports:
+                temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
+                random_port = random.choice(temp_port_list)
+                random_amount = random.randint(1, 10)
+                
+                for potential_computer_port in self.ports:
+                    if computer_port_name == potential_computer_port.name:
+                        computer_port = potential_computer_port
+                        break
+                
+                try:
+                    computer_messages+=self.trade_general(computer_port, random_amount, random_port)
+                except Exception as e:
+                    self.message = str(e)
+            
+            self.message = computer_messages
+                
+                
+    def trade_general(self, port1, amount, port2):
+
+        if port1 != port2:
+            amount = int(amount)
+            port1.send_goods(amount)
+            port2.purchase_goods(amount)
+            self.message = f'{port1.name} sold {amount}kg of goods to {port2.name}\n'
+            return(self.message)
+        else:
+            raise Exception("You can't trade with yourself!")
+
 
     def do_trade(self, line):
         try:
@@ -181,17 +254,16 @@ class MNM(cmd.Cmd):
             if port2 == None:
                 raise Exception(f"{port2_name} is not a valid name.")
 
-            if port1 != port2:
-                amount = int(amount)
-                port1.send_goods(amount)
-                port2.purchase_goods(amount)
-                trade_message = f'{port1.name} sold {amount}kg of goods to {port2.name}'
-                self.turn_index += 1
-                self.round(trade_message)
-            else:
-                raise Exception("You can't trade with yourself!")
+            self.trade_general(port1, amount, port2)
+            self.round()
+            
         except Exception as e:
             self.message = str(e)
+
+
+    def do_pass(self):
+        self.round()
+
 
 ###############################################################################
 #
@@ -232,7 +304,7 @@ How many people are playing?"""
     while gui.is_running() and (game.n_players != len(game.ports)):
         
         pick_message = f"""Please, pick your port by entering the name of one of the cities available on the map.
-Available ports : {game.available_ports}"""
+Available ports : {game.remaining_ports}"""
 
         gui.set_stats(pick_message, f"Player {game.player_count+1}")
 
@@ -243,10 +315,11 @@ Available ports : {game.available_ports}"""
         if choice is None:
             continue
         game.choose_port(choice)
-
-    game.round("")    
-
-    gui = Interface()
+        
+    for remaining_port_name in game.remaining_ports:
+        game.add_port_to_list(remaining_port_name, "Computer")
+        
+    game.round()    
 
     while gui.is_running():
 
