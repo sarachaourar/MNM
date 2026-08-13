@@ -284,8 +284,8 @@ class MNM(cmd.Cmd):
             if randomizer>0.5:
                 #the player has a 50% of being deposed (and losing the game) if the happiness reaches 0
                 self.n_players_real = self.n_players_real - 1
-                self.message = (f"The population of {self.current_port.name} has revolted."
-                                f"{self.current_port.player} has been deposed and no longer controls the city."
+                self.message = (f"The population of {self.current_port.name} has revolted.\n"
+                                f"{self.current_port.player} has been deposed and no longer controls the city.\n"
                                 )
                 self.current_port.player = "Computer"
 
@@ -334,6 +334,7 @@ class MNM(cmd.Cmd):
                     happiness_change+=-10/(len(ig)-1)
                 else:
                     ig[foreign_port]+=goods_change
+                    port.stock.total_wealth+=goods_change
             if all_foreign_goods:
                 #gets a little extra
                 happiness_change+=10/(len(ig)-1)
@@ -413,7 +414,6 @@ class MNM(cmd.Cmd):
                 raise Exception(f"{port2_name} is not a valid name.")
 
             self.trade_general(port1, int(amount), port2)
-            self.turn()
             
         except Exception as e:
             self.message = str(e)
@@ -439,12 +439,12 @@ class MNM(cmd.Cmd):
             self.message = str(e)
 
 
-    def do_pass(self, line):
+    def do_end_turn(self, line):
         """
-        pass
-        Pass your turn.
+        end_turn
+        End your turn.
         """
-        self.message = f"{self.current_port.player} passed\n"
+        self.message = f"{self.current_port.player} ended their turn\n"
         self.turn()
 
         
