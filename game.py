@@ -60,6 +60,7 @@ class Stock():
     ----------
     foreign_port: str
         The name of the port from which the foreign good is from.
+        
     foreign_goods: float
         The amount of a given foreign good from a foreign port.
     """
@@ -77,31 +78,43 @@ class Port():
     Attributes
     ----------
     name: str
-        name of the port.
+        Name of the port.
+        
     player: str
-        name of the player in charge of the port.
+        Name of the player/governor in charge of the port.
+        
     gold: float
         The amount of gold in the port.
-    coord: coordinate
-        x, y coordinates of the port.
-    hinterland: ??                                 <<<<<<<<<<NOT COMPLETE
-        does something                             <<<<<<<<<<NOT COMPLETE
+        
+    coord: Point
+        Coordinates of the port.
+        
+    hinterland: Hinterland
+        Hinterland associated with the port
+        
     imported_goods: dict
-        dictionary of the port's stock containing goods from other ports.
+        Dictionary of the port's stock containing goods from other ports.
+        
     max_stock: float
-        the maximum amount of foreign goods a port can hold.
-    total_wealth:
-        the total amount of goods in a port.
+        The maximum amount of foreign goods a port can hold.
+        
+    total_wealth: int
+        The total amount of goods in a port.
+        
+    visits: int
+        The aggregated number of visits of during the last rounds
 
     Methods:
     --------
     receive_goods()
         Adds the amount of foreign goods received to the port's stock. Returns money gained from taxes.
+        
     send_goods()
         Adds the amount of foreign goods received to the port's stock. Returns money paid in taxes.
     """
-
-    __slots__ = ('name', 'player', 'gold', 'coord', 'hinterland', 'imported_goods', 'max_stock', 'total_wealth')
+    
+    
+    __slots__ = ('name', 'player', 'gold', 'coord', 'hinterland', 'imported_goods', 'max_stock', 'total_wealth', 'visits')
 
     def __init__(self, name, player, gold, coord, hinterland):
         self.name = name
@@ -109,16 +122,17 @@ class Port():
         self.coord = coord
         self.gold = gold
         self.hinterland = hinterland
-
-        self.imported_goods = {}
+        
+        self.imported_goods = {}        
         for port in config["ports"]:
             if self.name == port:
                 pass
             else:
                 self.imported_goods[port] = Stock(foreign_goods = 0, foreign_port = port)
 
-        self.total_wealth = 0
         self.max_stock = 10
+        self.total_wealth = 0        
+        self.visits = 0
 
     def receive_goods(self, amount, port1):
 
@@ -139,8 +153,9 @@ class Port():
 
     
 class Hinterland(): #to be replaced by a GDF
-    __slots__ = ('goods', 'happiness', 'population', 'size')
-    def __init__(self, goods):
+    __slots__ = ('name', 'goods', 'happiness', 'population', "imported_goods", 'size')
+    def __init__(self, name, goods):
+        self.name = name
         self.goods = goods
         self.happiness = 100
         self.population = 20_000
@@ -155,9 +170,18 @@ class MNM(cmd.Cmd):
     def __init__(self, n_players):
         super().__init__()
         self.n_players = n_players
+        self.n_rounds  = 11
         
         for port in config["ports"]:
             self.remaining_ports.append(port)
+            
+    def default(self, line):
+        """
+        Called when the input doesn't match any known command.
+        Overridden so unknown commands report through the GUI instead of stdout.
+        """
+        command = line.split()[0] if line.split() else line
+        self.message = f"Unknown command: '{command}'. Type 'help' for a list of commands."
             
     def add_port_to_list(self, port_name, player_name):
         """
@@ -169,7 +193,7 @@ class MNM(cmd.Cmd):
         ----------
         port_name : str
             The name of the port to be added to the list
-            
+
         player_name : str
             The name of the player controlling this port
         """
@@ -178,7 +202,7 @@ class MNM(cmd.Cmd):
                                player_name,
                                args.gold,
                                parse_point(config["ports"][port_name]),
-                               Hinterland(args.goods)
+                               Hinterland(port_name,args.goods)
                                )
                           )
 
@@ -218,71 +242,119 @@ class MNM(cmd.Cmd):
 
         for port_key in self.current_port.imported_goods:
             text.append(f"{port_key} imported goods: {self.current_port.imported_goods[port_key].foreign_goods}")
-        
-        return (
+            
+            
+        part1= (
             f"Port : {self.current_port.name}\n"
             f"Gold : {self.current_port.gold}\n"
+            )
+        
+        part2= (
             f"Stock : {self.current_port.total_wealth} / {self.current_port.max_stock}\n"
             f"{text[0]}\n{text[1]}\n{text[2]}\n{text[3]}\n\n"
-            "You can trade goods with other cities using the command trade <amount> <port>\n"
-            "You can increase your stock using the command increase_stock <amount>\n\n"
             f"Last message:\n"
             f"{self.message}"
-        )                 
+            )
+            
+        if self.round_index >= (self.n_rounds - 10):
+            return part1+f"Cumulative Visits : {self.current_port.visits}\n"+part2
+        else:
+            return part1+part2
 
-    def round(self):
+    def turn(self):
+        """
+        Function that ends turns
+        
+        It moves the turn index into the next number and identifies the current player/port.
+        If the turn before was the end of the round, it executes end_round().
+        """
         self.turn_index += 1
+        self.round_index = self.turn_index // self.n_players
         
         self.current_turn = self.turn_index % self.n_players
         self.current_port = self.ports[self.current_turn]
         
         if self.turn_index!=0 and self.current_turn==0:
             #Computer time!!!
-            computer_messages = self.message
-            for computer_port_name in self.remaining_ports:
-                temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
-                random_port = random.choice(temp_port_list)
-                random_amount = random.randint(1, 10)
-                
-                for potential_computer_port in self.ports:
-                    if computer_port_name == potential_computer_port.name:
-                        computer_port = potential_computer_port
-                        break
-                
-                try:
-                    computer_messages+=self.trade_general(computer_port, random_amount, random_port)
-                except Exception as e:
-                    self.message = str(e)
+            self.end_round(self.round_index)
+
             
-            self.message = computer_messages
+    def end_round(self, round_number):
+        """
+        Function that ends rounds (a complete set of turns)
+        
+        It starts with computer time!
+        All the non-playable ports perform actions controlled by the computer:
+            First, selecting a random port to trade with.
+            Second, selecting a random amount of goods to trade.
+            And, finally, trading.
+        All the messages that resulted from this process are aggregated and shown to the players at the beginning of the next turn.
+        """
+        
+        computer_messages = self.message
+        for computer_port_name in self.remaining_ports:
+            temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
+            random_port = random.choice(temp_port_list)
+            random_amount = random.randint(1, 10)
+            
+            for potential_computer_port in self.ports:
+                if computer_port_name == potential_computer_port.name:
+                    computer_port = potential_computer_port
+                    break
+            
+            try:
+                computer_messages+=self.trade_general(computer_port, random_amount, random_port)
+            except Exception as e:
+                self.message = str(e)
+                
+        self.message = computer_messages
+        
+        
                 
                 
     def trade_general(self, port1, amount, port2):
+        """
+        Function that executes trades between ports.
+        
+        It is summoned by "do_trade()".
+
+        Parameters
+        ----------
+        port1 : Port
+            Port that is sending goods
+
+        amount : int
+            Amount of goods being traded
+
+        port2 : Port
+            Port that is receiving goods
+        """
 
         if port1 != port2:
-            amount = int(amount)
+            
             if port1.max_stock <= ((amount + port1.total_wealth) - 1):
                 raise Exception(f"You can't trade {amount}, you don't have enough stock!")
-            if port2.max_stock <= ((amount + port2.total_wealth) - 1):
+            elif port2.max_stock <= ((amount + port2.total_wealth) - 1):
                 raise Exception(f"The stock in the {port2.name} port can't take {amount} goods!")
-            if port1.max_stock <= ((amount + port1.total_wealth) - 1):
+            elif port1.max_stock <= ((amount + port1.total_wealth) - 1):
                 raise Exception("You can't trade, your stock is full!")
-
-            else:
-                port1.send_goods(amount, port2.name)
-                port2.receive_goods(amount, port1.name)
-                port1.total_wealth += amount
-                port2.total_wealth += amount
-                self.message = f'{port1.name} traded {amount} goods with {port2.name}\n'
-                return(self.message)
+                
+                
+            port1.send_goods(amount, port2.name)
+            port2.receive_goods(amount, port1.name)
+            port1.total_wealth += amount
+            port2.total_wealth += amount
+            
+            self.message = f'{port1.name} traded {amount} goods with {port2.name}\n'
+            return(self.message) #returns message, so that it can be aggregated with other messages from the computer-controled ports
         else:
             raise Exception("You can't trade with yourself!")
-
+            
     def do_increase_stock(self, amount):
         """
         increase_stock <amount> 
 
-        Increases the stock by a given amount. Returns the price paid for increasing the port's stock.
+        Increases the stock by a given amount.
         """
         try:
             self.current_port.max_stock += int(amount)
@@ -293,6 +365,10 @@ class MNM(cmd.Cmd):
             self.message = str(e)
 
     def do_trade(self, line):
+        """
+        trade <amount> <port>
+        Trade the given amount of goods with the specified port.
+        """
         try:
             amount, port2_name = line.split()
             port1 = self.current_port
@@ -307,15 +383,75 @@ class MNM(cmd.Cmd):
             if port2 == None:
                 raise Exception(f"{port2_name} is not a valid name.")
 
-            self.trade_general(port1, amount, port2)
-            self.round()
+            self.trade_general(port1, int(amount), port2)
+            self.turn()
+            
+        except Exception as e:
+            self.message = str(e)
+            
+    def do_change_player_name(self, line):
+        """
+        change_player_name <new name>
+        Change the current player's name.
+        """
+        try:
+            potential_name = line.lower()
+            if len(potential_name)<=10:
+                if "comput" not in potential_name:
+                    self.current_port.player = potential_name.title()
+                
+                else:
+                    raise Exception("That name is not allowed.")
+                
+            else:
+                raise Exception("That name is too long.")
             
         except Exception as e:
             self.message = str(e)
 
 
-    def do_pass(self):
-        self.round()
+    def do_pass(self, line):
+        """
+        pass
+        Pass your turn.
+        """
+        self.message = f"{self.current_port.player} passed\n"
+        self.turn()
+
+        
+    def do_help(self, line):
+        """
+        help [command]
+        Lists all available commands, or shows detailed help for one command.
+        """
+        
+        if line:
+            # Help for a specific command
+            func = getattr(self, f"do_{line}", None)
+            if func is None:
+                self.message = f"No help available: '{line}' is not a valid command."
+            elif func.__doc__:
+                self.message = func.__doc__
+            else:
+                self.message = f"No help text has been written for '{line}' yet."
+        else:
+            # List all available commands
+            command_names = sorted(
+                name[3:] for name in dir(self.__class__)
+                if name.startswith("do_") and name != "do_help" and callable(getattr(self, name))
+            )
+            
+            lines = ["Available commands:"]
+            for name in command_names:
+                func = getattr(self, f"do_{name}")
+                if func.__doc__:
+                    summary = func.__doc__.strip().split("\n")[0]
+                    lines.append(f"  {summary}")
+                else:
+                    lines.append(f"  {name}")
+            
+            lines.append("\nType 'help <command>' for more details on a specific command.")
+            self.message = "\n".join(lines)
 
 
 ###############################################################################
@@ -329,9 +465,10 @@ if __name__ == "__main__":
     gui = Interface()
     
     n_players = None
-    initial_message = """Welcome to the Mediterranean!
-Your goal is to become the most powerful trading hub in the Mediterranean Sea!
-How many people are playing?"""
+    initial_message = ("Welcome to the Mediterranean!\n"
+                       "Your goal is to become the most powerful trading hub in the Mediterranean Sea!\n"
+                       "How many people are playing?"
+                       )
     error_message = ""
     
     while gui.is_running() and n_players==None:
@@ -345,19 +482,19 @@ How many people are playing?"""
             try:
                 n_players = int(n_command)
                 
-                if n_players<0 or n_players>len(config["ports"]):
+                if n_players<1 or n_players>len(config["ports"]):
                     n_players = None
                     raise Exception()
                 
             except Exception:
-                error_message = f"\nPlease pick a number between 0 and {len(config["ports"])}"
+                error_message = f"\nPlease pick a number between 1 and {len(config["ports"])}"
             
     game = MNM(n_players)
     
     while gui.is_running() and (game.n_players != len(game.ports)):
         
-        pick_message = f"""Please, pick your port by entering the name of one of the cities available on the map.
-Available ports : {game.remaining_ports}"""
+        pick_message = ("Please, pick your port by entering the name of one of the cities available on the map.\n"
+                        f"Available ports : {game.remaining_ports}")
 
         gui.set_stats(pick_message, f"Player {game.player_count+1}")
 
@@ -372,11 +509,11 @@ Available ports : {game.remaining_ports}"""
     for remaining_port_name in game.remaining_ports:
         game.add_port_to_list(remaining_port_name, "Computer")
         
-    game.round()    
+    game.turn()    
 
     while gui.is_running():
 
-        gui.set_stats(game.get_stats(), f"{game.current_port.player}")
+        gui.set_stats(game.get_stats(), f"""Round {game.round_index + 1}: {game.current_port.player}""")
 
         gui.draw()
 
