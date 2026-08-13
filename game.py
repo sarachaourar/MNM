@@ -52,17 +52,28 @@ def parse_point(pointstring):
 #
 ###############################################################################
 
+class Hinterland(): #to be replaced by a GDF
+    __slots__ = ('name', 'goods', 'happiness', 'population', "imported_goods", 'size')
+    def __init__(self, name, goods):
+        self.name = name
+        self.goods = goods
+        self.happiness = 40 #100
+        self.population = 20_000
+        
 class Stock():
     """
-    A Stock allows ports to store and sort the foreign goods they traded with other ports.
+    A Stock stores foreign goods traded with other ports.
 
     Attributes
     ----------
-    foreign_port: str
-        The name of the port from which the foreign good is from.
+    imported_goods: dict
+        Dictionary of the goods from other ports.
         
-    foreign_goods: float
-        The amount of a given foreign good from a foreign port.
+    max_stock: float
+        The maximum amount of foreign goods a port can hold.
+        
+    total_wealth: int
+        The total amount of goods in a port.
     """
     def __init__(self, name):
         self.max_stock = 10
@@ -78,6 +89,7 @@ class Stock():
 
     def maintenance_cost():
         pass
+
 
 class Port():
     """
@@ -100,14 +112,8 @@ class Port():
     hinterland: Hinterland
         Hinterland associated with the port
         
-    imported_goods: dict
-        Dictionary of the port's stock containing goods from other ports.
-        
-    max_stock: float
-        The maximum amount of foreign goods a port can hold.
-        
-    total_wealth: int
-        The total amount of goods in a port.
+    stock: Stock
+        Stock associated with the port
         
     visits: int
         The aggregated number of visits of during the last rounds
@@ -115,10 +121,10 @@ class Port():
     Methods:
     --------
     receive_goods()
-        Adds the amount of foreign goods received to the port's stock. Returns money gained from taxes.
+        Adds the amount of foreign goods received to the port's stock. Returns money gained from fees.
         
     send_goods()
-        Adds the amount of foreign goods received to the port's stock. Returns money paid in taxes.
+        Adds the amount of foreign goods received to the port's stock. Returns money paid in fees.
     """
     
     
@@ -136,40 +142,33 @@ class Port():
     def receive_goods(self, amount, port1):
 
         self.stock.imported_goods[port1] += amount
-        tax = 10
-        self.gold += tax
-        return tax 
+        fee = 10
+        self.gold += fee
+        return fee 
 
-    def send_goods(self, amount, port2): 
-        #SARA's note
-        #This version does not take into account the fact that the sent 
-        #goods might not be purchased, all goods sent are purchased in this version.
+    def send_goods(self, amount, port2):
 
         self.stock.imported_goods[port2] += amount
-        tax = 10
-        self.gold -= tax
-        return tax   
-
-    
-class Hinterland(): #to be replaced by a GDF
-    __slots__ = ('name', 'goods', 'happiness', 'population', "imported_goods", 'size')
-    def __init__(self, name, goods):
-        self.name = name
-        self.goods = goods
-        self.happiness = 100
-        self.population = 20_000
+        fee = 10
+        self.gold -= fee
+        return fee   
     
 class MNM(cmd.Cmd):
 
-    ports = []
-    remaining_ports = []
-    player_count=0
-    turn_index = -1
+    __slots__ = ('n_players_og', 'n_players_real', 'n_rounds', 'ports',
+                 'remaining_ports', 'player_count', 'turn_index', 'round_index',
+                 'message', 'current_turn', 'current_port')
 
     def __init__(self, n_players):
         super().__init__()
-        self.n_players = n_players
+        self.n_players_og = n_players
+        self.n_players_real = n_players
         self.n_rounds  = 11
+        self.ports = []
+        self.remaining_ports = []
+        self.player_count=0
+        self.turn_index = -1
+        self.round_index = 0
         
         for port in config["ports"]:
             self.remaining_ports.append(port)
@@ -221,15 +220,16 @@ class MNM(cmd.Cmd):
         
         if chosen_port_name in self.remaining_ports:
             player_name = f"Player {self.player_count+1}"
-            self.message = f"{player_name} is playing as the {chosen_port_name} port\n"
             
             self.add_port_to_list(chosen_port_name, player_name)
             
             self.player_count+=1
             self.remaining_ports.remove(chosen_port_name)
             
+            return f"{player_name} is playing as the {chosen_port_name} port.\n"
+            
         else:
-            self.mesage = "This port is not available. Choose something else..."
+            return ""
 
     def get_stats(self):
         """
@@ -245,6 +245,8 @@ class MNM(cmd.Cmd):
             
         part1= (
             f"Port : {self.current_port.name}\n"
+            f"Hinterland Population : {int(self.current_port.hinterland.population/1_000)}k\n"
+            f"Happiness : {self.current_port.hinterland.happiness}\n"
             f"Gold : {self.current_port.gold}\n"
             )
         
@@ -268,14 +270,27 @@ class MNM(cmd.Cmd):
         If the turn before was the end of the round, it executes end_round().
         """
         self.turn_index += 1
-        self.round_index = self.turn_index // self.n_players
-        
-        self.current_turn = self.turn_index % self.n_players
+        self.current_turn = self.turn_index % self.n_players_og
         self.current_port = self.ports[self.current_turn]
         
         if self.turn_index!=0 and self.current_turn==0:
             #Computer time!!!
             self.end_round(self.round_index)
+        
+        if self.current_port.hinterland.happiness<=0 and self.current_port.player!="Computer":
+            self.current_port.hinterland.happiness=0
+            
+            randomizer = random.random()
+            if randomizer>0.5:
+                #the player has a 50% of being deposed (and losing the game) if the happiness reaches 0
+                self.n_players_real = self.n_players_real - 1
+                self.message = (f"The population of {self.current_port.name} has revolted."
+                                f"{self.current_port.player} has been deposed and no longer controls the city."
+                                )
+                self.current_port.player = "Computer"
+
+        if self.current_port.player=="Computer":
+            self.turn()
 
             
     def end_round(self, round_number):
@@ -304,12 +319,30 @@ class MNM(cmd.Cmd):
             try:
                 computer_messages+=self.trade_general(computer_port, random_amount, random_port)
             except Exception as e:
-                self.message = str(e)
+                computer_messages+=str(e)
                 
-        self.message = computer_messages
-        
-        
+        self.message = computer_messages   
                 
+        for port in self.ports:
+            ig = port.stock.imported_goods
+            happiness_change = 10/(len(ig)-1)
+            all_foreign_goods = True
+            goods_change = -int(port.hinterland.population / 1_000_000 + 1) #so that, for every million, the goods gone in each turn decreases by 1
+            for foreign_port, foreign_goods in ig.items():
+                if foreign_goods==0:
+                    all_foreign_goods = False
+                    happiness_change+=-10/(len(ig)-1)
+                else:
+                    ig[foreign_port]+=goods_change
+            if all_foreign_goods:
+                #gets a little extra
+                happiness_change+=10/(len(ig)-1)
+            port.hinterland.happiness+=int(happiness_change)
+            
+            productivity_tax = port.hinterland.happiness / 1_000_000 #so that at happiness=100, a 10_000 gives 1 gold
+            port.gold+=int(round(productivity_tax*port.hinterland.population))
+        
+        self.round_index +=1 
                 
     def trade_general(self, port1, amount, port2):
         """
@@ -332,9 +365,9 @@ class MNM(cmd.Cmd):
         if port1 != port2:
             
             if port1.stock.max_stock <= ((amount + port1.stock.total_wealth) - 1):
-                raise Exception(f"You can't trade {amount}, you don't have enough stock!")
+                raise Exception(f"{port1.name} tried to trade {amount}, but the {port1.name} port doesn't have enough stock!\n")
             elif port2.stock.max_stock <= ((amount + port2.stock.total_wealth) - 1):
-                raise Exception(f"The stock in the {port2.name} port can't take {amount} goods!")               
+                raise Exception(f"{port1.name} tried to trade with {port2.name}, but the {port2.name} port can't take {amount} goods!\n")               
                 
             port1.send_goods(amount, port2.name)
             port2.receive_goods(amount, port1.name)
@@ -461,6 +494,8 @@ if __name__ == "__main__":
     gui = Interface()
     
     n_players = None
+    n_ports = len(config["ports"])
+    
     initial_message = ("Welcome to the Mediterranean!\n"
                        "Your goal is to become the most powerful trading hub in the Mediterranean Sea!\n"
                        "How many people are playing?"
@@ -478,7 +513,7 @@ if __name__ == "__main__":
             try:
                 n_players = int(n_command)
                 
-                if n_players<1 or n_players>len(config["ports"]):
+                if n_players<1 or n_players>n_ports:
                     n_players = None
                     raise Exception()
                 
@@ -487,10 +522,20 @@ if __name__ == "__main__":
             
     game = MNM(n_players)
     
-    while gui.is_running() and (game.n_players != len(game.ports)):
+    extra_message="The map contains the list of port cities available to play.\n"
+                   
+    choice=None
+    
+    while gui.is_running() and (game.n_players_og != len(game.ports)):
         
-        pick_message = ("Please, pick your port by entering the name of one of the cities available on the map.\n"
-                        f"Available ports : {game.remaining_ports}")
+        if extra_message=="":
+            extra_message="That is not an available port.\n"
+        elif len(game.ports)>0 and choice!=None:
+            extra_message+=f"Now, it's your turn, Player {game.player_count+1}.\n"
+        
+        pick_message = (extra_message+
+                        f"Available ports : {game.remaining_ports}\n"+
+                        "Type the name of an available port to pick it for yourself.")
 
         gui.set_stats(pick_message, f"Player {game.player_count+1}")
 
@@ -500,10 +545,14 @@ if __name__ == "__main__":
 
         if choice is None:
             continue
-        game.choose_port(choice)
+        
+        extra_message=game.choose_port(choice)
+    
         
     for remaining_port_name in game.remaining_ports:
         game.add_port_to_list(remaining_port_name, "Computer")
+        
+    game.message=extra_message
         
     game.turn()    
 
