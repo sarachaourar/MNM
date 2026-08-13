@@ -358,8 +358,8 @@ class MNM(cmd.Cmd):
         """
         try:
             self.current_port.max_stock += int(amount)
-            self.current_port.gold -= 10
-            self.message = f"You have increased your stock by {amount} for 10 gold."
+            self.current_port.gold -= int(amount)
+            self.message = f"You have increased your stock by {amount} for {amount} gold."
         
         except Exception as e:
             self.message = str(e)
