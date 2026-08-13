@@ -64,9 +64,17 @@ class Stock():
     foreign_goods: float
         The amount of a given foreign good from a foreign port.
     """
-    def __init__(self, foreign_goods, foreign_port):
-        self.foreign_port = foreign_port
-        self.foreign_goods = foreign_goods
+    def __init__(self, name):
+        self.max_stock = 10
+
+        self.imported_goods = {}        
+        for port in config["ports"]:
+            if name == port:
+                pass
+            else:
+                self.imported_goods[port] = 0
+
+        self.total_wealth = 0                   
 
     def maintenance_cost():
         pass
@@ -114,7 +122,7 @@ class Port():
     """
     
     
-    __slots__ = ('name', 'player', 'gold', 'coord', 'hinterland', 'imported_goods', 'max_stock', 'total_wealth', 'visits')
+    __slots__ = ('name', 'player', 'gold', 'coord', 'hinterland', 'stock', 'visits')
 
     def __init__(self, name, player, gold, coord, hinterland):
         self.name = name
@@ -122,21 +130,12 @@ class Port():
         self.coord = coord
         self.gold = gold
         self.hinterland = hinterland
-        
-        self.imported_goods = {}        
-        for port in config["ports"]:
-            if self.name == port:
-                pass
-            else:
-                self.imported_goods[port] = Stock(foreign_goods = 0, foreign_port = port)
-
-        self.max_stock = 10
-        self.total_wealth = 0        
+        self.stock = Stock(self.name)     
         self.visits = 0
 
     def receive_goods(self, amount, port1):
 
-        self.imported_goods[port1].foreign_goods += amount
+        self.stock.imported_goods[port1] += amount
         tax = 10
         self.gold += tax
         return tax 
@@ -146,7 +145,7 @@ class Port():
         #This version does not take into account the fact that the sent 
         #goods might not be purchased, all goods sent are purchased in this version.
 
-        self.imported_goods[port2].foreign_goods += amount
+        self.stock.imported_goods[port2] += amount
         tax = 10
         self.gold -= tax
         return tax   
@@ -240,8 +239,8 @@ class MNM(cmd.Cmd):
         """
         text = []
 
-        for port_key in self.current_port.imported_goods:
-            text.append(f"{port_key} imported goods: {self.current_port.imported_goods[port_key].foreign_goods}")
+        for port_key in self.current_port.stock.imported_goods:
+            text.append(f"{port_key} imported goods: {self.current_port.stock.imported_goods[port_key]}")
             
             
         part1= (
@@ -250,7 +249,7 @@ class MNM(cmd.Cmd):
             )
         
         part2= (
-            f"Stock : {self.current_port.total_wealth} / {self.current_port.max_stock}\n"
+            f"Stock : {self.current_port.stock.total_wealth} / {self.current_port.stock.max_stock}\n"
             f"{text[0]}\n{text[1]}\n{text[2]}\n{text[3]}\n\n"
             f"Last message:\n"
             f"{self.message}"
@@ -332,18 +331,15 @@ class MNM(cmd.Cmd):
 
         if port1 != port2:
             
-            if port1.max_stock <= ((amount + port1.total_wealth) - 1):
+            if port1.stock.max_stock <= ((amount + port1.stock.total_wealth) - 1):
                 raise Exception(f"You can't trade {amount}, you don't have enough stock!")
-            elif port2.max_stock <= ((amount + port2.total_wealth) - 1):
-                raise Exception(f"The stock in the {port2.name} port can't take {amount} goods!")
-            elif port1.max_stock <= ((amount + port1.total_wealth) - 1):
-                raise Exception("You can't trade, your stock is full!")
-                
+            elif port2.stock.max_stock <= ((amount + port2.stock.total_wealth) - 1):
+                raise Exception(f"The stock in the {port2.name} port can't take {amount} goods!")               
                 
             port1.send_goods(amount, port2.name)
             port2.receive_goods(amount, port1.name)
-            port1.total_wealth += amount
-            port2.total_wealth += amount
+            port1.stock.total_wealth += amount
+            port2.stock.total_wealth += amount
             
             self.message = f'{port1.name} traded {amount} goods with {port2.name}\n'
             return(self.message) #returns message, so that it can be aggregated with other messages from the computer-controled ports
@@ -357,7 +353,7 @@ class MNM(cmd.Cmd):
         Increases the stock by a given amount.
         """
         try:
-            self.current_port.max_stock += int(amount)
+            self.current_port.stock.max_stock += int(amount)
             self.current_port.gold -= int(amount)
             self.message = f"You have increased your stock by {amount} for {amount} gold."
         
