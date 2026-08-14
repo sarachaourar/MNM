@@ -3,7 +3,7 @@ import cmd
 import argparse
 import random
 from shapely import Point
-from interfaceGPT2 import Interface
+from interfaceGPT3 import Interface
 
 ###############################################################################
 #
@@ -253,8 +253,6 @@ class MNM(cmd.Cmd):
         part2= (
             f"Stock : {self.current_port.stock.total_wealth} / {self.current_port.stock.max_stock}\n"
             f"{text[0]}\n{text[1]}\n{text[2]}\n{text[3]}\n\n"
-            f"Last message:\n"
-            f"{self.message}"
             )
             
         if self.round_index >= (self.n_rounds - 10):
@@ -307,14 +305,24 @@ class MNM(cmd.Cmd):
         
         computer_messages = self.message
         for computer_port_name in self.remaining_ports:
-            temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
-            random_port = random.choice(temp_port_list)
-            random_amount = random.randint(1, 10)
             
             for potential_computer_port in self.ports:
                 if computer_port_name == potential_computer_port.name:
                     computer_port = potential_computer_port
                     break
+                
+            temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
+            random_port = random.choice(temp_port_list)
+            random_amount = random.randint(1, 10)
+            
+            
+            
+            
+            try:
+                if computer_port.stock.total_wealth > 0.9 * computer_port.stock.max_stock:
+                    computer_messages+=self.increase_stock_general(computer_port, 10)
+            except Exception as e:
+                computer_messages+=str(e)
             
             try:
                 computer_messages+=self.trade_general(computer_port, random_amount, random_port)
@@ -344,6 +352,44 @@ class MNM(cmd.Cmd):
             port.gold+=int(round(productivity_tax*port.hinterland.population))
         
         self.round_index +=1 
+        
+    def increase_stock_general(self, port, amount):
+        """
+        Function that increases the stock of a port
+        
+        It is summoned by "do_increase_stock()".
+
+        Parameters
+        ----------
+        port : Port
+            Port whose stock is to be increased
+
+        amount : int
+            Change in stock
+        """
+
+        if amount<0:
+            raise Exception("Nice try! Please use positive numbers.\n")
+            
+        elif amount>port.gold:
+            raise Exception(f"{port.name} tried to increase stock by {amount}, but doesn't have the gold to pay for it!\n")
+
+        port.stock.max_stock += amount
+        port.gold -= amount
+        self.message = f"{port.player} has increased the stock of {port.name} by {amount}.\n"
+        return(self.message)
+        
+    def do_increase_stock(self, amount):
+        """
+        increase_stock <amount> 
+
+        Increases the stock by a given amount for the same amount of gold.
+        """
+        try:
+            self.increase_stock_general(self.current_port, int(amount))
+        
+        except Exception as e:
+            self.message = str(e)
                 
     def trade_general(self, port1, amount, port2):
         """
@@ -379,20 +425,6 @@ class MNM(cmd.Cmd):
             return(self.message) #returns message, so that it can be aggregated with other messages from the computer-controled ports
         else:
             raise Exception("You can't trade with yourself!")
-            
-    def do_increase_stock(self, amount):
-        """
-        increase_stock <amount> 
-
-        Increases the stock by a given amount.
-        """
-        try:
-            self.current_port.stock.max_stock += int(amount)
-            self.current_port.gold -= int(amount)
-            self.message = f"You have increased your stock by {amount} for {amount} gold."
-        
-        except Exception as e:
-            self.message = str(e)
 
     def do_trade(self, line):
         """
@@ -518,7 +550,7 @@ if __name__ == "__main__":
                     raise Exception()
                 
             except Exception:
-                error_message = f"\nPlease pick a number between 1 and {len(config["ports"])}"
+                error_message = f"\nPlease pick a number between 1 and {n_ports}"
             
     game = MNM(n_players)
     
@@ -559,7 +591,8 @@ if __name__ == "__main__":
     while gui.is_running():
 
         gui.set_stats(game.get_stats(), f"""Round {game.round_index + 1}: {game.current_port.player}""")
-
+        gui.set_message(game.message)
+        
         gui.draw()
 
         command = gui.get_command()
