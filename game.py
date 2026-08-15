@@ -191,8 +191,8 @@ class Map():
     land_resistance: int
         value assigned to land pixels to prevent routes from going in-land
         
-    resistance: xarray DataArray
-        raster with resistance values to calculate routes
+    resistance: numpy.ndarray
+        array with resistance values to calculate routes
 
     Methods
     ----------
@@ -221,8 +221,8 @@ class Map():
         
     def find_route(self, port1, port2):
         
-        start_row, start_col = rowcol(self.pop_raster.rio.transform(), port1.coord.x, port1.coord.y) #athens
-        end_row, end_col = rowcol(self.pop_raster.rio.transform(), port2.coord.x, port2.coord.y)
+        start_row, start_col = rowcol(self.pop_raster.rio.transform(), port1.coord.x, port1.coord.y) #AI
+        end_row, end_col = rowcol(self.pop_raster.rio.transform(), port2.coord.x, port2.coord.y) #AI
         
         indices, weight = route_through_array(
             self.resistance,
@@ -359,6 +359,7 @@ class MNM(cmd.Cmd):
             
         part1= (
             f"Port : {self.current_port.name}\n"
+            f"Port Fee : {self.current_port.fee}\n"
             f"Hinterland Population : {int(self.current_port.hinterland.population/1_000)}k\n"
             f"Happiness : {self.current_port.hinterland.happiness}\n"
             f"Gold : {self.current_port.gold}\n"
@@ -418,10 +419,10 @@ class MNM(cmd.Cmd):
         It starts with computer time!
         All the non-playable ports perform actions controlled by the computer:
             First, paying the port's maintenance cost.
-            Second, if stock space is lacking, increase the stock.
+            Second, if stock space is lacking, try to increase the stock.
             Third, trading 2 units with all the ports whose goods are at low levels.
         All the messages that resulted from this process are aggregated and shown to the players at the beginning of the next turn.
-        After the computer actions, the happiness levels of every port are recalculated and the stored goods decrease.
+        After the computer actions, the happiness levels of every port (playable or not) are recalculated and the stored goods decrease.
         Finally, the population pays their productivity tax depending on their happiness level.
         """
         
@@ -543,7 +544,7 @@ class MNM(cmd.Cmd):
                 raise Exception(f"{port1.name} tried to trade with {port2.name}, but the {port2.name} port can't take {amount} goods!\n")
             elif port1.gold <= port1.shipping_costs[port2.name]:
                 raise Exception(f"{port1.name} tried to trade with {port2.name}, but it can't afford the journey!\n")
-            elif port1.gold <= port2.fee:
+            elif port1.gold <= port1.shipping_costs[port2.name] + port2.fee:
                 raise Exception(f"{port1.name} tried to trade with {port2.name}, but it can't afford {port2.name}'s {port2.fee} fee!\n")
                 
             port1.send_goods(amount, port2)
@@ -589,6 +590,7 @@ class MNM(cmd.Cmd):
             
             else:
                 self.current_port.fee = new_fee
+                self.message = f"{self.current_port.name} has a new port fee."
             
         except Exception as e:
             self.message = str(e)
@@ -601,11 +603,16 @@ class MNM(cmd.Cmd):
         try:
             potential_name = line.lower()
             if len(potential_name)<=10:
-                if "comput" not in potential_name:
-                    self.current_port.player = potential_name.title()
-                
+                if len(potential_name)>=0:
+                    if "comput" not in potential_name:
+                        self.current_port.player = potential_name.title()
+                        self.message = f"{self.current_port.name}'s player has a new name."
+                        
+                    else:
+                        raise Exception("That name is not allowed.")
+                        
                 else:
-                    raise Exception("That name is not allowed.")
+                    raise Exception("That name is too short.")
                 
             else:
                 raise Exception("That name is too long.")
