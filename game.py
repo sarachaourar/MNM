@@ -275,8 +275,6 @@ class MNM(cmd.Cmd):
         part2= (
             f"Stock : {self.current_port.stock.total_wealth} / {self.current_port.stock.max_stock}\n"
             f"{text[0]}\n{text[1]}\n{text[2]}\n{text[3]}\n\n"
-            f"Last message:\n"
-            f"{self.message}"
             )
             
         if self.round_index >= (self.n_rounds - 10):
@@ -296,10 +294,13 @@ class MNM(cmd.Cmd):
         self.current_port = self.ports[self.current_turn]
         
         if self.turn_index != 0:
-            self.current_port.gold -= (self.current_port.stock.max_stock - 9)*10
             if self.current_turn==0:
                 #Computer time!!!
                 self.end_round(self.round_index) 
+
+        if self.round_index != 0: 
+            port_maintenance = (self.current_port.stock.max_stock - 9)*10
+            self.current_port.gold -= port_maintenance
         
         if self.current_port.hinterland.happiness<=0 and self.current_port.player!="Computer":
             self.current_port.hinterland.happiness=0
@@ -315,7 +316,7 @@ class MNM(cmd.Cmd):
 
         if self.current_port.player=="Computer":
             self.turn()
-
+            print(f"{self.current_port.name} paid a tax of {port_maintenance}")
             
     def end_round(self, round_number):
         """
@@ -335,6 +336,9 @@ class MNM(cmd.Cmd):
             for potential_computer_port in self.ports:
                 if computer_port_name == potential_computer_port.name:
                     computer_port = potential_computer_port
+                    if self.round_index != 0: 
+                        port_maintenance = (computer_port.stock.max_stock - 9)*10
+                        computer_port.gold -= port_maintenance
                     break
 
             temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
