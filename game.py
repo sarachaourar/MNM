@@ -3,7 +3,7 @@ import cmd
 import argparse
 import random
 from shapely import Point
-from interfaceGPT3 import Interface
+from interfaceGPT2 import Interface
 
 ###############################################################################
 #
@@ -67,7 +67,7 @@ class Stock():
     Attributes
     ----------
     imported_goods: dict
-        Dictionary of the goods from other ports.
+        Dictionary of the amounts of foreign goods from their respective  foreign ports.
         
     max_stock: float
         The maximum amount of foreign goods a port can hold.
@@ -140,14 +140,36 @@ class Port():
         self.visits = 0
 
     def receive_goods(self, amount, port1):
+        """Method to receive goods when a trade is called.
 
+        This method allows a port to recieve goods and gold after the player calls a trade with it.
+
+        Prameters
+        ---------
+        amount: float
+            The amount of goods that is received.
+
+        port1: str
+            The port from which the foreign goods are being imported. 
+        """
         self.stock.imported_goods[port1] += amount
         fee = 10
         self.gold += fee
         return fee 
 
     def send_goods(self, amount, port2):
+        """Method to send goods when a trade is called.
 
+        This method allows a port/player to send goods and to pay a fee in gold after they call a trade.
+
+        Parameters
+        ----------
+        amount: float
+            The amount of goods that is sent.
+
+        port2: str
+            The port from which the foreign goods are gained during the trade. 
+        """
         self.stock.imported_goods[port2] += amount
         fee = 10
         self.gold -= fee
@@ -253,6 +275,8 @@ class MNM(cmd.Cmd):
         part2= (
             f"Stock : {self.current_port.stock.total_wealth} / {self.current_port.stock.max_stock}\n"
             f"{text[0]}\n{text[1]}\n{text[2]}\n{text[3]}\n\n"
+            f"Last message:\n"
+            f"{self.message}"
             )
             
         if self.round_index >= (self.n_rounds - 10):
@@ -271,9 +295,11 @@ class MNM(cmd.Cmd):
         self.current_turn = self.turn_index % self.n_players_og
         self.current_port = self.ports[self.current_turn]
         
-        if self.turn_index!=0 and self.current_turn==0:
-            #Computer time!!!
-            self.end_round(self.round_index)
+        if self.turn_index != 0:
+            self.current_port.gold -= (self.current_port.stock.max_stock - 9)*10
+            if self.current_turn==0:
+                #Computer time!!!
+                self.end_round(self.round_index) 
         
         if self.current_port.hinterland.happiness<=0 and self.current_port.player!="Computer":
             self.current_port.hinterland.happiness=0
@@ -304,30 +330,33 @@ class MNM(cmd.Cmd):
         """
         
         computer_messages = self.message
+
         for computer_port_name in self.remaining_ports:
-            
             for potential_computer_port in self.ports:
                 if computer_port_name == potential_computer_port.name:
                     computer_port = potential_computer_port
                     break
-                
+
             temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
-            random_port = random.choice(temp_port_list)
-            random_amount = random.randint(1, 10)
             
-            
-            
-            
+            cig = computer_port.stock.imported_goods
+            not_random_port = list(cig.items())
+            not_random_port= sorted(not_random_port, key=lambda tup: tup[1])
+
+            minamount = int(not_random_port[0][1])
+
             try:
                 if computer_port.stock.total_wealth > 0.9 * computer_port.stock.max_stock:
                     computer_messages+=self.increase_stock_general(computer_port, 10)
             except Exception as e:
-                computer_messages+=str(e)
-            
-            try:
-                computer_messages+=self.trade_general(computer_port, random_amount, random_port)
-            except Exception as e:
-                computer_messages+=str(e)
+                computer_messages+=str(e)            
+
+            for p in temp_port_list:
+                if cig[p.name] == minamount:
+                    try:
+                        computer_messages+=self.trade_general(computer_port, 2, p)
+                    except Exception as e:
+                        computer_messages+=str(e)
                 
         self.message = computer_messages   
                 
@@ -352,33 +381,33 @@ class MNM(cmd.Cmd):
             port.gold+=int(round(productivity_tax*port.hinterland.population))
         
         self.round_index +=1 
-        
+                
     def increase_stock_general(self, port, amount):
-        """
-        Function that increases the stock of a port
-        
-        It is summoned by "do_increase_stock()".
-
-        Parameters
-        ----------
-        port : Port
-            Port whose stock is to be increased
-
-        amount : int
-            Change in stock
-        """
-
-        if amount<0:
-            raise Exception("Nice try! Please use positive numbers.\n")
+            """
+            Function that increases the stock of a port
             
-        elif amount>port.gold:
-            raise Exception(f"{port.name} tried to increase stock by {amount}, but doesn't have the gold to pay for it!\n")
-
-        port.stock.max_stock += amount
-        port.gold -= amount
-        self.message = f"{port.player} has increased the stock of {port.name} by {amount}.\n"
-        return(self.message)
-        
+            It is summoned by "do_increase_stock()".
+    
+            Parameters
+            ----------
+            port : Port
+                Port whose stock is to be increased
+    
+            amount : int
+                Change in stock
+            """
+    
+            if amount<0:
+                raise Exception("Nice try! Please use positive numbers.\n")
+                
+            elif amount>port.gold:
+                raise Exception(f"{port.name} tried to increase stock by {amount}, but doesn't have the gold to pay for it!\n")
+    
+            port.stock.max_stock += amount
+            port.gold -= amount
+            self.message = f"{port.player} has increased the stock of {port.name} by {amount}.\n"
+            return(self.message)
+            
     def do_increase_stock(self, amount):
         """
         increase_stock <amount> 
@@ -425,7 +454,7 @@ class MNM(cmd.Cmd):
             return(self.message) #returns message, so that it can be aggregated with other messages from the computer-controled ports
         else:
             raise Exception("You can't trade with yourself!")
-
+    
     def do_trade(self, line):
         """
         trade <amount> <port>
@@ -529,9 +558,9 @@ if __name__ == "__main__":
     n_ports = len(config["ports"])
     
     initial_message = ("Welcome to the Mediterranean!\n"
-                       "Your goal is to become the most powerful trading hub in the Mediterranean Sea!\n"
-                       "How many people are playing?"
-                       )
+                        "Your goal is to become the most powerful trading hub in the Mediterranean Sea!\n"
+                        "How many people are playing?"
+                        )
     error_message = ""
     
     while gui.is_running() and n_players==None:
@@ -555,7 +584,7 @@ if __name__ == "__main__":
     game = MNM(n_players)
     
     extra_message="The map contains the list of port cities available to play.\n"
-                   
+                    
     choice=None
     
     while gui.is_running() and (game.n_players_og != len(game.ports)):
