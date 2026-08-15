@@ -116,7 +116,7 @@ class Interface:
         self.stats = text
         self.stats_title = title
 
-    def set_message(self, text, title="Last message"):
+    def set_message(self, text, title="Messages"):
         """Set the contents of the message panel."""
 
         self.message = text
