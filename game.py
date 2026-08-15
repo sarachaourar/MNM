@@ -2,7 +2,11 @@ import yaml
 import cmd
 import argparse
 import random
-from shapely import Point
+import sys
+import rioxarray as rioxr
+from shapely import Point#, LineString
+from skimage.graph import route_through_array
+from rasterio.transform import rowcol
 from interfaceGPT3 import Interface
 
 ###############################################################################
@@ -16,6 +20,7 @@ from interfaceGPT3 import Interface
 #
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', type=str, default='config.yml')
+parser.add_argument('--fee', type=float, default=10)
 parser.add_argument('--gold', type=float, default=1500)
 parser.add_argument('--goods', type=float, default=20)
 args = parser.parse_args()
@@ -57,7 +62,7 @@ class Hinterland(): #to be replaced by a GDF
     def __init__(self, name, goods):
         self.name = name
         self.goods = goods
-        self.happiness = 40 #100
+        self.happiness = 50 #100
         self.population = 20_000
         
 class Stock():
@@ -67,7 +72,7 @@ class Stock():
     Attributes
     ----------
     imported_goods: dict
-        Dictionary of the amounts of foreign goods from their respective  foreign ports.
+        Dictionary of the goods from other ports.
         
     max_stock: float
         The maximum amount of foreign goods a port can hold.
@@ -86,9 +91,6 @@ class Stock():
                 self.imported_goods[port] = 0
 
         self.total_wealth = 0                   
-
-    def maintenance_cost():
-        pass
 
 
 class Port():
@@ -115,30 +117,31 @@ class Port():
     stock: Stock
         Stock associated with the port
         
-    visits: int
-        The aggregated number of visits of during the last rounds
+    shipping_costs: int
+        Dictionary of the cost to ship to other ports.
 
     Methods:
     --------
     receive_goods()
-        Adds the amount of foreign goods received to the port's stock. Returns money gained from fees.
+        Adds the amount of foreign goods received to the port's stock.
         
     send_goods()
-        Adds the amount of foreign goods received to the port's stock. Returns money paid in fees.
+        Adds the amount of foreign goods received to the port's stock.
     """
     
     
-    __slots__ = ('name', 'player', 'gold', 'coord', 'hinterland', 'stock', 'visits')
+    __slots__ = ('name', 'player', 'gold', 'fee', 'coord', 'hinterland', 'stock', 'shipping_costs')
 
-    def __init__(self, name, player, gold, coord, hinterland):
+    def __init__(self, name, player, gold, fee, coord, hinterland):
         self.name = name
         self.player = player
         self.coord = coord
         self.gold = gold
+        self.fee = fee
         self.hinterland = hinterland
-        self.stock = Stock(self.name)     
-        self.visits = 0
-
+        self.stock = Stock(self.name)
+        self.shipping_costs = {}    
+        
     def receive_goods(self, amount, port1):
         """Method to receive goods when a trade is called.
 
@@ -149,13 +152,13 @@ class Port():
         amount: float
             The amount of goods that is received.
 
-        port1: str
+        port1: Port
             The port from which the foreign goods are being imported. 
         """
-        self.stock.imported_goods[port1] += amount
-        fee = 10
-        self.gold += fee
-        return fee 
+        
+        self.stock.imported_goods[port1.name] += amount
+        self.stock.total_wealth += amount
+        self.gold += self.fee
 
     def send_goods(self, amount, port2):
         """Method to send goods when a trade is called.
@@ -167,14 +170,83 @@ class Port():
         amount: float
             The amount of goods that is sent.
 
-        port2: str
+        port2: Port
             The port from which the foreign goods are gained during the trade. 
         """
-        self.stock.imported_goods[port2] += amount
-        fee = 10
-        self.gold -= fee
-        return fee   
+        
+        self.stock.imported_goods[port2.name] += amount
+        self.stock.total_wealth += amount
+        self.gold -= (port2.fee + self.shipping_costs[port2.name])
     
+    
+class Map():
+    """
+    Class for spatial calculations and deriving information from the map
+
+    Attributes
+    ----------
+    pop_raster: xarray DataArray
+        raster with the population density values
+        
+    land_resistance: int
+        value assigned to land pixels to prevent routes from going in-land
+        
+    resistance: xarray DataArray
+        raster with resistance values to calculate routes
+
+    Methods
+    ----------
+
+
+    """
+
+    def __init__(self):
+
+        try:
+            with rioxr.open_rasterio(config["raster"]) as tif:
+                self.pop_raster = tif.load()
+            #print('Success!')
+        except Exception as e:
+            print(e)
+            sys.exit()
+    
+        self.pop_raster = self.pop_raster.squeeze()
+        
+        self.resistance = self.pop_raster.values.copy()
+        
+        self.land_resistance = 1000
+    
+        self.resistance[self.resistance!=-9999] = self.land_resistance
+        self.resistance[self.resistance!= self.land_resistance] = 1
+        
+    def find_route(self, port1, port2):
+        
+        start_row, start_col = rowcol(self.pop_raster.rio.transform(), port1.coord.x, port1.coord.y) #athens
+        end_row, end_col = rowcol(self.pop_raster.rio.transform(), port2.coord.x, port2.coord.y)
+        
+        indices, weight = route_through_array(
+            self.resistance,
+            (start_row, start_col),
+            (end_row, end_col),
+            fully_connected=True,
+            geometric=True
+        )
+        
+        return(indices, int(weight-self.land_resistance))
+    
+    def calc_shipping_costs(self):
+
+        for index1, port1 in enumerate(game.ports):
+            for index2, port2 in enumerate(game.ports):
+                if index2 > index1:
+                    pass
+                else:
+                    _, cost = self.find_route(port1, port2)
+                    
+                    port1.shipping_costs[port2.name] = cost
+                    port2.shipping_costs[port1.name] = cost 
+
+
 class MNM(cmd.Cmd):
 
     __slots__ = ('n_players_og', 'n_players_real', 'n_rounds', 'ports',
@@ -191,6 +263,7 @@ class MNM(cmd.Cmd):
         self.player_count=0
         self.turn_index = -1
         self.round_index = 0
+        self.message = ""
         
         for port in config["ports"]:
             self.remaining_ports.append(port)
@@ -221,11 +294,11 @@ class MNM(cmd.Cmd):
         self.ports.append(Port(port_name,
                                player_name,
                                args.gold,
+                               args.fee,
                                parse_point(config["ports"][port_name]),
                                Hinterland(port_name,args.goods)
                                )
                           )
-
     
     def choose_port(self, chosen_port_name):
         """
@@ -252,6 +325,25 @@ class MNM(cmd.Cmd):
             
         else:
             return ""
+        
+    def fetch_port(self, port_name):
+        """
+        Function to fetch the port object with a given name
+
+        Parameters
+        ----------
+        port_name : str
+            Name of the port
+            
+        Returns
+        ----------
+        Port
+            Port object with given name
+        """
+        
+        for potential_port in self.ports:
+            if port_name == potential_port.name:
+                return potential_port
 
     def get_stats(self):
         """
@@ -277,10 +369,11 @@ class MNM(cmd.Cmd):
             f"{text[0]}\n{text[1]}\n{text[2]}\n{text[3]}\n\n"
             )
             
-        if self.round_index >= (self.n_rounds - 10):
-            return part1+f"Cumulative Visits : {self.current_port.visits}\n"+part2
-        else:
-            return part1+part2
+        #if self.round_index >= (self.n_rounds - 10):
+        #    return part1+f"Cumulative Visits : {self.current_port.visits}\n"+part2
+        #else:
+        #    return part1+part2
+        return part1+part2
 
     def turn(self):
         """
@@ -293,13 +386,13 @@ class MNM(cmd.Cmd):
         self.current_turn = self.turn_index % self.n_players_og
         self.current_port = self.ports[self.current_turn]
         
-        if self.turn_index != 0:
-            if self.current_turn==0:
-                #Computer time!!!
-                self.end_round(self.round_index) 
-
+        if self.turn_index!=0 and self.current_turn==0:
+            #Computer time!!!
+            self.end_round(self.round_index)
+        
         if self.round_index != 0: 
-            port_maintenance = (self.current_port.stock.max_stock - 9)*10
+            # so the current player doesn't pay maintenance the first round
+            port_maintenance = (self.current_port.stock.max_stock - 9)*1 #to be adjusteed (here and in round) if needed
             self.current_port.gold -= port_maintenance
         
         if self.current_port.hinterland.happiness<=0 and self.current_port.player!="Computer":
@@ -316,7 +409,7 @@ class MNM(cmd.Cmd):
 
         if self.current_port.player=="Computer":
             self.turn()
-            print(f"{self.current_port.name} paid a tax of {port_maintenance}")
+
             
     def end_round(self, round_number):
         """
@@ -324,36 +417,36 @@ class MNM(cmd.Cmd):
         
         It starts with computer time!
         All the non-playable ports perform actions controlled by the computer:
-            First, selecting a random port to trade with.
-            Second, selecting a random amount of goods to trade.
-            And, finally, trading.
+            First, paying the port's maintenance cost.
+            Second, if stock space is lacking, increase the stock.
+            Third, trading 2 units with all the ports whose goods are at low levels.
         All the messages that resulted from this process are aggregated and shown to the players at the beginning of the next turn.
+        After the computer actions, the happiness levels of every port are recalculated and the stored goods decrease.
+        Finally, the population pays their productivity tax depending on their happiness level.
         """
         
         computer_messages = self.message
-
         for computer_port_name in self.remaining_ports:
-            for potential_computer_port in self.ports:
-                if computer_port_name == potential_computer_port.name:
-                    computer_port = potential_computer_port
-                    if self.round_index != 0: 
-                        port_maintenance = (computer_port.stock.max_stock - 9)*10
-                        computer_port.gold -= port_maintenance
-                    break
-
+            
+            computer_port = self.fetch_port(computer_port_name)
+            
+            if self.round_index != 0: 
+                port_maintenance = (computer_port.stock.max_stock - 9)*1 #to be adjusteed (here and in turn) if needed
+                computer_port.gold -= port_maintenance
+                
+            try:
+                if computer_port.stock.total_wealth > 0.9 * computer_port.stock.max_stock:
+                    computer_messages+=self.increase_stock_general(computer_port, 10)
+            except Exception as e:
+                computer_messages+=str(e)
+            
             temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
             
             cig = computer_port.stock.imported_goods
             not_random_port = list(cig.items())
             not_random_port= sorted(not_random_port, key=lambda tup: tup[1])
 
-            minamount = int(not_random_port[0][1])
-
-            try:
-                if computer_port.stock.total_wealth > 0.9 * computer_port.stock.max_stock:
-                    computer_messages+=self.increase_stock_general(computer_port, 10)
-            except Exception as e:
-                computer_messages+=str(e)            
+            minamount = int(not_random_port[0][1])        
 
             for p in temp_port_list:
                 if cig[p.name] == minamount:
@@ -385,38 +478,38 @@ class MNM(cmd.Cmd):
             port.gold+=int(round(productivity_tax*port.hinterland.population))
         
         self.round_index +=1 
-                
+        
     def increase_stock_general(self, port, amount):
-            """
-            Function that increases the stock of a port
+        """
+        Function that increases the stock of a port
+        
+        It is summoned by "do_increase_stock()".
+
+        Parameters
+        ----------
+        port : Port
+            Port whose stock is to be increased
+
+        amount : int
+            Change in stock
+        """
+
+        if amount<0:
+            raise Exception("Nice try! Please use positive numbers.\n")
             
-            It is summoned by "do_increase_stock()".
-    
-            Parameters
-            ----------
-            port : Port
-                Port whose stock is to be increased
-    
-            amount : int
-                Change in stock
-            """
-    
-            if amount<0:
-                raise Exception("Nice try! Please use positive numbers.\n")
-                
-            elif amount>port.gold:
-                raise Exception(f"{port.name} tried to increase stock by {amount}, but doesn't have the gold to pay for it!\n")
-    
-            port.stock.max_stock += amount
-            port.gold -= amount
-            self.message = f"{port.player} has increased the stock of {port.name} by {amount}.\n"
-            return(self.message)
-            
+        elif amount>port.gold:
+            raise Exception(f"{port.name} tried to increase stock by {amount}, but doesn't have the gold to pay for it!\n")
+
+        port.stock.max_stock += amount
+        port.gold -= 10*amount
+        self.message = f"{port.player} has increased the stock of {port.name} by {amount}.\n"
+        return(self.message)
+        
     def do_increase_stock(self, amount):
         """
         increase_stock <amount> 
-
-        Increases the stock by a given amount for the same amount of gold.
+        Increases the stock by a given amount for 10x that amount of gold.
+        For every unit of stock you increase, you will pay 1 more unit of gold of port maintenance every turn
         """
         try:
             self.increase_stock_general(self.current_port, int(amount))
@@ -445,40 +538,57 @@ class MNM(cmd.Cmd):
         if port1 != port2:
             
             if port1.stock.max_stock <= ((amount + port1.stock.total_wealth) - 1):
-                raise Exception(f"{port1.name} tried to trade {amount}, but the {port1.name} port doesn't have enough stock!\n")
+                raise Exception(f"{port1.name} tried to trade {amount}, but doesn't have enough stock!\n")
             elif port2.stock.max_stock <= ((amount + port2.stock.total_wealth) - 1):
-                raise Exception(f"{port1.name} tried to trade with {port2.name}, but the {port2.name} port can't take {amount} goods!\n")               
+                raise Exception(f"{port1.name} tried to trade with {port2.name}, but the {port2.name} port can't take {amount} goods!\n")
+            elif port1.gold <= port1.shipping_costs[port2.name]:
+                raise Exception(f"{port1.name} tried to trade with {port2.name}, but it can't afford the journey!\n")
+            elif port1.gold <= port2.fee:
+                raise Exception(f"{port1.name} tried to trade with {port2.name}, but it can't afford {port2.name}'s {port2.fee} fee!\n")
                 
-            port1.send_goods(amount, port2.name)
-            port2.receive_goods(amount, port1.name)
-            port1.stock.total_wealth += amount
-            port2.stock.total_wealth += amount
+            port1.send_goods(amount, port2)
+            port2.receive_goods(amount, port1)
             
             self.message = f'{port1.name} traded {amount} goods with {port2.name}\n'
             return(self.message) #returns message, so that it can be aggregated with other messages from the computer-controled ports
         else:
             raise Exception("You can't trade with yourself!")
-    
+
     def do_trade(self, line):
         """
         trade <amount> <port>
-        Trade the given amount of goods with the specified port.
+        Executed if you have enough money to pay for the specified port's fees and the trip there.
+        In that case, you'll give the stated amount of goods to the specified port.
+        In return, you'll receive the same amount of that port's goods
         """
         try:
             amount, port2_name = line.split()
             port1 = self.current_port
-            
-            port2 = None
-            
-            for potential_port in self.ports:
-                if port2_name == potential_port.name:
-                    port2 = potential_port
-                    break
+
+            port2 = self.fetch_port(port2_name)
             
             if port2 == None:
                 raise Exception(f"{port2_name} is not a valid name.")
 
             self.trade_general(port1, int(amount), port2)
+            
+        except Exception as e:
+            self.message = str(e)
+            
+    def do_change_fee_to(self, line):
+        """
+        change_fee_to <new value>
+        Change your port's current fee for visitors.
+        """
+        try:
+            
+            new_fee = int(line)
+            
+            if new_fee<0:
+                raise Exception("That's not allowed.\n")
+            
+            else:
+                self.current_port.fee = new_fee
             
         except Exception as e:
             self.message = str(e)
@@ -554,17 +664,22 @@ class MNM(cmd.Cmd):
 #
 ###############################################################################
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
     
     gui = Interface()
+    
+    mnm_map = Map()
     
     n_players = None
     n_ports = len(config["ports"])
     
     initial_message = ("Welcome to the Mediterranean!\n"
-                        "Your goal is to become the most powerful trading hub in the Mediterranean Sea!\n"
-                        "How many people are playing?"
-                        )
+                       "Your goal is to become the most powerful trading hub in the Mediterranean Sea!\n"
+                       "And you must also insure your population remains happy, by providing them with goods from every port!\n"
+                       "The larger your population is and the happier they are, the higher your productivity revenue will be every turn!\n"
+                       "Beware, though: an unhappy population might try to depose their governor!\n"
+                       "Are you ready? How many people are playing?"
+                       )
     error_message = ""
     
     while gui.is_running() and n_players==None:
@@ -587,8 +702,8 @@ if __name__ == "__main__":
             
     game = MNM(n_players)
     
-    extra_message="The map contains the list of port cities available to play.\n"
-                    
+    extra_message=" "
+                   
     choice=None
     
     while gui.is_running() and (game.n_players_og != len(game.ports)):
@@ -598,11 +713,12 @@ if __name__ == "__main__":
         elif len(game.ports)>0 and choice!=None:
             extra_message+=f"Now, it's your turn, Player {game.player_count+1}.\n"
         
-        pick_message = (extra_message+
+        pick_message = ("The map contains the list of port cities available to play.\n"
                         f"Available ports : {game.remaining_ports}\n"+
                         "Type the name of an available port to pick it for yourself.")
 
         gui.set_stats(pick_message, f"Player {game.player_count+1}")
+        gui.set_message(extra_message+game.message)
 
         gui.draw()
 
@@ -612,14 +728,19 @@ if __name__ == "__main__":
             continue
         
         extra_message=game.choose_port(choice)
+        
+    if gui.is_running():
     
+        game.message=extra_message
+        gui.set_stats("Building World Map...", "Loading...")
+        gui.draw()
+            
+        for remaining_port_name in game.remaining_ports:
+            game.add_port_to_list(remaining_port_name, "Computer")
         
-    for remaining_port_name in game.remaining_ports:
-        game.add_port_to_list(remaining_port_name, "Computer")
-        
-    game.message=extra_message
-        
-    game.turn()    
+        mnm_map.calc_shipping_costs()        
+            
+        game.turn()    
 
     while gui.is_running():
 
