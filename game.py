@@ -3,7 +3,7 @@ import cmd
 import argparse
 import random
 from shapely import Point
-from interfaceGPT2 import Interface
+from interfaceGPT3 import Interface
 
 ###############################################################################
 #
