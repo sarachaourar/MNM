@@ -3,8 +3,11 @@ import cmd
 import argparse
 import random
 import sys
+import rasterio
+import geopandas as gpd
 import rioxarray as rioxr
-from shapely import Point#, LineString
+from shapely import Point, LineString, Polygon
+from shapely.ops import unary_union
 from skimage.graph import route_through_array
 from rasterio.transform import rowcol
 from interfaceGPT3 import Interface
@@ -58,12 +61,15 @@ def parse_point(pointstring):
 ###############################################################################
 
 class Hinterland(): #to be replaced by a GDF
-    __slots__ = ('name', 'goods', 'happiness', 'population', "imported_goods", 'size')
-    def __init__(self, name, goods):
+    __slots__ = ('name', 'goods', 'happiness', 'hinter_indices', 'area', 'population', 'geometry')
+    def __init__(self, name, goods, hinter_indices, area, population, geometry):
         self.name = name
         self.goods = goods
         self.happiness = 50 #100
-        self.population = 20_000
+        self.hinter_indices = hinter_indices
+        self.area = area
+        self.population = population
+        self.geometry = geometry        
         
 class Stock():
     """
@@ -188,6 +194,9 @@ class Map():
     pop_raster: xarray DataArray
         raster with the population density values
         
+    pop_gdf: geopandas GeoDataFrame
+        raster with the population density values
+        
     land_resistance: int
         value assigned to land pixels to prevent routes from going in-land
         
@@ -212,12 +221,29 @@ class Map():
     
         self.pop_raster = self.pop_raster.squeeze()
         
-        self.resistance = self.pop_raster.values.copy()
+        raster_val = self.pop_raster.values
+        
+        self.resistance = raster_val.copy()
         
         self.land_resistance = 1000
     
         self.resistance[self.resistance!=-9999] = self.land_resistance
         self.resistance[self.resistance!= self.land_resistance] = 1
+        
+        
+        shapes = rasterio.features.shapes(raster_val, transform=self.pop_raster.rio.transform()) #AI
+        
+        geometries = []
+        colvalues = []
+        for (geom, colval) in shapes:
+            geometries.append(Polygon(geom["coordinates"][0]))
+            colvalues.append(colval)
+        
+        self.pop_gdf = gpd.GeoDataFrame({"value": colvalues, "geometry": geometries})
+        self.pop_gdf.crs = self.pop_raster.spatial_ref.crs_wkt #or raster.rio.crs
+        
+        self.pop_gdf['area']= (self.pop_gdf.to_crs("EPSG:2062")).geometry.area / 10**6
+        self.pop_gdf['pop'] = (self.pop_gdf['value'] * self.pop_gdf['area']).astype(int)
         
     def find_route(self, port1, port2):
         
@@ -291,12 +317,36 @@ class MNM(cmd.Cmd):
             The name of the player controlling this port
         """
         
+        port_coords = parse_point(config["ports"][port_name])
+        
+        gdf_intersec = mnm_map.pop_gdf[mnm_map.pop_gdf.intersects(port_coords)]
+        port_pixel = mnm_map.pop_gdf[mnm_map.pop_gdf.intersects(port_coords)].iloc[0]
+        gdf_nonulls = mnm_map.pop_gdf[mnm_map.pop_gdf['value']>0]
+            
+        neighbour_gdf = gdf_nonulls[gdf_nonulls.touches(port_pixel.geometry)]
+        
+        #To exclude the diagonal neighbours:
+        neighbour_intersections = neighbour_gdf.geometry.intersection(port_pixel.geometry).to_crs("EPSG:2062") #AI
+        shared_length = neighbour_intersections.length #AI
+        close_neighbour_gdf = neighbour_gdf[shared_length > 0] #AI
+        
+        hinter_indices = gdf_intersec.index.tolist() #AI
+        hinter_indices+=list(set(close_neighbour_gdf.index))
+        
+        subset = gdf_nonulls.loc[hinter_indices]
+        
         self.ports.append(Port(port_name,
                                player_name,
                                args.gold,
                                args.fee,
-                               parse_point(config["ports"][port_name]),
-                               Hinterland(port_name,args.goods)
+                               port_coords,
+                               Hinterland(port_name,
+                                          args.goods,
+                                          hinter_indices,
+                                          subset['area'].sum(),
+                                          subset['pop'].sum(),
+                                          unary_union(subset.geometry)
+                                          )
                                )
                           )
     
@@ -675,8 +725,6 @@ if __name__ == "__main__":
     
     gui = Interface()
     
-    mnm_map = Map()
-    
     n_players = None
     n_ports = len(config["ports"])
     
@@ -706,12 +754,19 @@ if __name__ == "__main__":
                 
             except Exception:
                 error_message = f"\nPlease pick a number between 1 and {n_ports}"
-            
-    game = MNM(n_players)
     
-    extra_message=" "
-                   
-    choice=None
+    if gui.is_running():
+    
+        gui.set_stats("Building World Map...", "Loading...")
+        gui.draw()
+            
+        mnm_map = Map()
+                
+        game = MNM(n_players)
+        
+        extra_message=" "
+                       
+        choice=None
     
     while gui.is_running() and (game.n_players_og != len(game.ports)):
         
@@ -739,7 +794,7 @@ if __name__ == "__main__":
     if gui.is_running():
     
         game.message=extra_message
-        gui.set_stats("Building World Map...", "Loading...")
+        gui.set_stats("Creating remaining ports...", "Loading...")
         gui.draw()
             
         for remaining_port_name in game.remaining_ports:
