@@ -273,8 +273,8 @@ class Map():
 
         for index1, port1 in enumerate(game.ports):
             for index2, port2 in enumerate(game.ports):
-                if index2 > index1:
-                    pass
+                if index2 <= index1:
+                    continue
                 else:
                     _, cost = self.find_route(port1, port2)
                     
@@ -286,7 +286,7 @@ class MNM(cmd.Cmd):
 
     __slots__ = ('n_players_og', 'n_players_real', 'n_rounds', 'ports',
                  'remaining_ports', 'player_count', 'turn_index', 'round_index',
-                 'message', 'current_turn', 'current_port')
+                 'message', 'current_turn', 'current_port', 'GAME_OVER')
 
     def __init__(self, n_players):
         super().__init__()
@@ -299,6 +299,7 @@ class MNM(cmd.Cmd):
         self.turn_index = -1
         self.round_index = 0
         self.message = ""
+        self.GAME_OVER = False
         
         for port in config["ports"]:
             self.remaining_ports.append(port)
@@ -404,7 +405,7 @@ class MNM(cmd.Cmd):
             if port_name == potential_port.name:
                 return potential_port
 
-    def get_stats(self):
+    def get_stats(self, port, allparts=True):
         """
         Function that is used to transmit stats to the GUI
         
@@ -413,30 +414,33 @@ class MNM(cmd.Cmd):
         text_list = []
         text = ""
 
-        for port_key in self.current_port.stock.imported_goods:
-            text_list.append(f"{port_key} imported goods: {self.current_port.stock.imported_goods[port_key]}")
+        for port_key in port.stock.imported_goods:
+            text_list.append(f"{port_key} imported goods: {port.stock.imported_goods[port_key]}")
 
         for item in text_list:
             text += f"{item}\n"    
             
         part1= (
-            f"Port : {self.current_port.name}\n"
-            f"Port Fee : {self.current_port.fee}\n"
-            f"Hinterland Population : {int(self.current_port.hinterland.population/1_000)}k\n"
-            f"Happiness : {self.current_port.hinterland.happiness}\n"
-            f"Gold : {self.current_port.gold}\n"
+            f"Port : {port.name}\n"
+            f"Port Fee : {port.fee}\n"
+            f"Hinterland Population : {int(port.hinterland.population/1_000)}k\n"
+            f"Happiness : {port.hinterland.happiness}\n"
+            f"Gold : {port.gold}\n"
             )
         
         part2= (
-            f"Stock : {self.current_port.stock.total_wealth} / {self.current_port.stock.max_stock}\n"
+            f"Stock : {port.stock.total_wealth} / {port.stock.max_stock}\n"
             f"{text}\n\n"
             )
             
         #if self.round_index >= (self.n_rounds - 10):
-        #    return part1+f"Cumulative Visits : {self.current_port.visits}\n"+part2
+        #    return part1+f"Cumulative Visits : {port.visits}\n"+part2
         #else:
         #    return part1+part2
-        return part1+part2
+        if allparts:
+            return part1+part2
+        else:
+            return part1
 
     def turn(self):
         """
@@ -454,21 +458,24 @@ class MNM(cmd.Cmd):
             self.end_round(self.round_index)
 
         if self.round_index != 0: 
-            self.message = self.current_port.maintenance_cost()
+            self.message += self.current_port.maintenance_cost()
         
         if self.current_port.hinterland.happiness<=0 and self.current_port.player!="Computer":
             self.current_port.hinterland.happiness=0
             
             randomizer = random.random()
             if randomizer>0.5:
-                #the player has a 50% of being deposed (and losing the game) if the happiness reaches 0
+                #the player has a 50% chance of being deposed (and losing the game) if the happiness reaches 0
                 self.n_players_real = self.n_players_real - 1
-                self.message = (f"The population of {self.current_port.name} has revolted.\n"
+                self.message += (f"The population of {self.current_port.name} has revolted.\n"
                                 f"{self.current_port.player} has been deposed and no longer controls the city.\n"
                                 )
                 self.current_port.player = "Computer"
+                
+        if self.n_players_real==0:
+            self.GAME_OVER = True
 
-        if self.current_port.player=="Computer":
+        elif self.current_port.player=="Computer":
             self.turn()
 
             
@@ -494,11 +501,18 @@ class MNM(cmd.Cmd):
             computer_port.maintenance_cost()
                 
             try:
-                if computer_port.stock.total_wealth > 0.9 * computer_port.stock.max_stock:
+                if computer_port.stock.total_wealth > 0.8 * computer_port.stock.max_stock:
                     self.increase_stock_general(computer_port, 10)
-                    print(self.increase_stock_general(computer_port, 10))
+                    print(f"{computer_port.name} increase stock to {computer_port.stock.max_stock}")
+                    #(self.increase_stock_general(computer_port, 10))
             except Exception as e:
                 str(e)
+                
+            if computer_port.hinterland.happiness<=20:
+                computer_port.fee=0
+            elif computer_port.gold<=200:
+                computer_port.fee+=50
+                
             
             temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
             
@@ -522,15 +536,16 @@ class MNM(cmd.Cmd):
                             pass
                 
         self.message = computer_messages   
-                
+        
         for port in self.ports:
             ig = port.stock.imported_goods
-            happiness_change = 10/(len(ig)-1)
+            happiness_change = 5/(1-1/len(ig)) # = 10*(len(ig)/2)/(len(ig)-1) so that, if half the goods're missing, the happiness doesn't decrease
             all_foreign_goods = True
             goods_change = -int(port.hinterland.population / 1_000_000 + 1) #so that, for every million, the goods gone in each turn increases by 1
             for foreign_port, foreign_goods in ig.items():
-                if (foreign_goods + goods_change) <= 0:
+                if (foreign_goods + goods_change) < 0:
                     all_foreign_goods = False
+                    port.stock.total_wealth-=ig[foreign_port]
                     ig[foreign_port] = 0
                     happiness_change+=-10/(len(ig)-1)
                 else:
@@ -541,7 +556,7 @@ class MNM(cmd.Cmd):
                 happiness_change+=10/(len(ig)-1)
             port.hinterland.happiness+=int(happiness_change)
             
-            productivity_tax = port.hinterland.happiness / 1_000_000 #so that, at happiness=100, a 10_000 population gives 1 gold
+            productivity_tax = port.hinterland.happiness / 100_000 #so that, at happiness=100, a 10_000 population gives 10 gold
             port.gold+=int(round(productivity_tax*port.hinterland.population))
         
         self.round_index +=1 
@@ -641,6 +656,29 @@ class MNM(cmd.Cmd):
             
         except Exception as e:
             self.message = str(e)
+            
+    def do_travel_costs(self, line):
+        """
+        travel_costs 
+        Check how much it would cost to travel to the other cities from your port
+        """
+        costs_mess = f"Travelling Costs from {self.current_port.name}:\n"
+        for port_name in self.current_port.shipping_costs:
+            costs_mess+= f"  {port_name}: {self.current_port.shipping_costs[port_name]} gold.\n"
+        
+        self.message = costs_mess
+        
+    def do_port_fees(self, line):
+        """
+        port_fees 
+        Check the current port fees of the other ports. Beware that they might change!
+        """
+        costs_mess = "Current port fees:\n"
+        for port_name in self.current_port.shipping_costs:
+            port = self.fetch_port(port_name)
+            costs_mess+= f"  {port_name}: {port.fee} gold.\n"
+        
+        self.message = costs_mess
             
     def do_change_fee_to(self, line):
         """
@@ -818,11 +856,11 @@ if __name__ == "__main__":
         
         mnm_map.calc_shipping_costs()        
             
-        game.turn()    
+        game.turn()
+    
+    while gui.is_running() and not game.GAME_OVER:
 
-    while gui.is_running():
-
-        gui.set_stats(game.get_stats(), f"""Round {game.round_index + 1}: {game.current_port.player}""")
+        gui.set_stats(game.get_stats(game.current_port), f"Round {game.round_index + 1}: {game.current_port.player}")
         gui.set_message(game.message)
         
         gui.draw()
@@ -838,4 +876,41 @@ if __name__ == "__main__":
         # Reload the map every turn.
         gui.set_map("assets/map.png")
 
+        if game.round_index==15:
+            
+            winner = None
+            winner_gold = 0
+            
+            for port in game.ports:
+                if port.gold > winner_gold:
+                    winner = port
+                    winner_gold = port.gold
+                
+            while gui.is_running() and not game.GAME_OVER:
+        
+                gui.set_stats(game.get_stats(winner, False), f"Hooray, {winner.player}!!!")
+                gui.set_message(game.message+
+                                f"{winner.player}, governing over {winner.name} has won the game!\n"+
+                                "If you wish to continue playing, write 'continue'.\n"
+                                )
+                
+                gui.draw()
+        
+                command = gui.get_command()
+        
+                if command is None:
+                    continue
+        
+                if command=='continue':
+                    break
+
+    
+    while gui.is_running() and game.GAME_OVER:
+        gui.set_stats("All the players have been deposed!", "GAME OVER")
+        gui.set_message(game.message)
+        
+        gui.draw()
+
+        command = gui.get_command()
+        
     gui.close()    
