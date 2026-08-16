@@ -527,7 +527,7 @@ class MNM(cmd.Cmd):
             ig = port.stock.imported_goods
             happiness_change = 10/(len(ig)-1)
             all_foreign_goods = True
-            goods_change = -int(port.hinterland.population / 1_000_000 + 1) #so that, for every million, the goods gone in each turn decreases by 1
+            goods_change = -int(port.hinterland.population / 1_000_000 + 1) #so that, for every million, the goods gone in each turn increases by 1
             for foreign_port, foreign_goods in ig.items():
                 if (foreign_goods + goods_change) <= 0:
                     all_foreign_goods = False
@@ -541,7 +541,7 @@ class MNM(cmd.Cmd):
                 happiness_change+=10/(len(ig)-1)
             port.hinterland.happiness+=int(happiness_change)
             
-            productivity_tax = port.hinterland.happiness / 1_000_000 #so that at happiness=100, a 10_000 gives 1 gold
+            productivity_tax = port.hinterland.happiness / 1_000_000 #so that, at happiness=100, a 10_000 population gives 1 gold
             port.gold+=int(round(productivity_tax*port.hinterland.population))
         
         self.round_index +=1 
