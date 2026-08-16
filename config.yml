@@ -1,8 +1,15 @@
 raster: "popd_2025AD_med.tif"
 
 ports:
-  "T"  : Point(13.1875,32.8875)
-  "A"  : Point(3.087222,36.7325)
-  "P_S": Point(32.306111,31.2625)
-  "M"  : Point(15.5205,38.1087)
-  "V"  : Point(-0.3208,39.4652)
+  "Tripoli"    : Point(13.1875,32.8875)
+  "Algiers"    : Point(3.087222,36.7325)
+  "Tunis"      : Point(10.2952,36.8115)
+  "Athens"     : Point(23.62857,37.9405)
+  "Port_Said"  : Point(32.306111,31.2625)
+  "Messina"    : Point(15.5205,38.1087)
+  "Algeciras"  : Point(-5.4341,36.1350)
+  "Trieste"    : Point(13.6951,45.6515)
+  "Valencia"   : Point(-0.3208,39.4652)
+  "Mersin"     : Point(34.627222,36.794444)
+  "Genoa"      : Point(8.9328,44.3372)
+  "Marseille" : Point(5.3696,43.2982)
