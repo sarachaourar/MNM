@@ -98,7 +98,6 @@ class Stock():
 
         self.total_wealth = 0                   
 
-
 class Port():
     """
     A Port manages the trading of goods between ports.
@@ -147,6 +146,16 @@ class Port():
         self.hinterland = hinterland
         self.stock = Stock(self.name)
         self.shipping_costs = {}    
+
+    def maintenance_cost(self):
+        port_maintenance = (self.stock.max_stock - 10)*1
+        if (self.gold - port_maintenance) <= 0:
+            self.gold = 0
+            self.stock.max_stock = 10
+            return f"{self.name} can't afford to maintain their port anymore, their stock goes back to 10"
+        else:
+            self.gold -= port_maintenance   
+            return ""
         
     def receive_goods(self, amount, port1):
         """Method to receive goods when a trade is called.
@@ -401,11 +410,14 @@ class MNM(cmd.Cmd):
         
         It prints the desired stats
         """
-        text = []
+        text_list = []
+        text = ""
 
         for port_key in self.current_port.stock.imported_goods:
-            text.append(f"{port_key} imported goods: {self.current_port.stock.imported_goods[port_key]}")
-            
+            text_list.append(f"{port_key} imported goods: {self.current_port.stock.imported_goods[port_key]}")
+
+        for item in text_list:
+            text += f"{item}\n"    
             
         part1= (
             f"Port : {self.current_port.name}\n"
@@ -417,7 +429,7 @@ class MNM(cmd.Cmd):
         
         part2= (
             f"Stock : {self.current_port.stock.total_wealth} / {self.current_port.stock.max_stock}\n"
-            f"{text[0]}\n{text[1]}\n{text[2]}\n{text[3]}\n\n"
+            f"{text}\n\n"
             )
             
         #if self.round_index >= (self.n_rounds - 10):
@@ -440,11 +452,9 @@ class MNM(cmd.Cmd):
         if self.turn_index!=0 and self.current_turn==0:
             #Computer time!!!
             self.end_round(self.round_index)
-        
+
         if self.round_index != 0: 
-            # so the current player doesn't pay maintenance the first round
-            port_maintenance = (self.current_port.stock.max_stock - 9)*1 #to be adjusteed (here and in round) if needed
-            self.current_port.gold -= port_maintenance
+            self.message = self.current_port.maintenance_cost()
         
         if self.current_port.hinterland.happiness<=0 and self.current_port.player!="Computer":
             self.current_port.hinterland.happiness=0
@@ -481,15 +491,14 @@ class MNM(cmd.Cmd):
             
             computer_port = self.fetch_port(computer_port_name)
             
-            if self.round_index != 0: 
-                port_maintenance = (computer_port.stock.max_stock - 9)*1 #to be adjusteed (here and in turn) if needed
-                computer_port.gold -= port_maintenance
+            computer_port.maintenance_cost()
                 
             try:
                 if computer_port.stock.total_wealth > 0.9 * computer_port.stock.max_stock:
-                    computer_messages+=self.increase_stock_general(computer_port, 10)
+                    self.increase_stock_general(computer_port, 10)
+                    print(self.increase_stock_general(computer_port, 10))
             except Exception as e:
-                computer_messages+=str(e)
+                str(e)
             
             temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
             
@@ -502,9 +511,15 @@ class MNM(cmd.Cmd):
             for p in temp_port_list:
                 if cig[p.name] == minamount:
                     try:
-                        computer_messages+=self.trade_general(computer_port, 2, p)
+                        if p.player != 'Computer':
+                            computer_messages+=self.trade_general(computer_port, 2, p)
+                        else:
+                            self.trade_general(computer_port, 2, p)
                     except Exception as e:
-                        computer_messages+=str(e)
+                        if p.player != 'Computer':
+                            computer_messages+=str(e)
+                        else:
+                            pass
                 
         self.message = computer_messages   
                 
@@ -514,8 +529,9 @@ class MNM(cmd.Cmd):
             all_foreign_goods = True
             goods_change = -int(port.hinterland.population / 1_000_000 + 1) #so that, for every million, the goods gone in each turn decreases by 1
             for foreign_port, foreign_goods in ig.items():
-                if foreign_goods==0:
+                if (foreign_goods + goods_change) <= 0:
                     all_foreign_goods = False
+                    ig[foreign_port] = 0
                     happiness_change+=-10/(len(ig)-1)
                 else:
                     ig[foreign_port]+=goods_change
@@ -548,7 +564,7 @@ class MNM(cmd.Cmd):
         if amount<0:
             raise Exception("Nice try! Please use positive numbers.\n")
             
-        elif amount>port.gold:
+        elif (10*amount)>port.gold:
             raise Exception(f"{port.name} tried to increase stock by {amount}, but doesn't have the gold to pay for it!\n")
 
         port.stock.max_stock += amount
