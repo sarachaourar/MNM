@@ -10,7 +10,7 @@ from shapely import Point, LineString, Polygon
 from shapely.ops import unary_union
 from skimage.graph import route_through_array
 from rasterio.transform import rowcol
-from interfaceGPT3 import Interface
+from interfaceGPT4 import Interface
 
 ###############################################################################
 #
@@ -148,6 +148,12 @@ class Port():
         self.shipping_costs = {}    
 
     def maintenance_cost(self):
+        """
+        Function that applies maintenance costs
+        
+        It is summoned by "turn()" and "end_round()".
+        """
+        
         port_maintenance = (self.stock.max_stock - 10)*1
         if (self.gold - port_maintenance) <= 0:
             self.gold = 0
@@ -156,6 +162,34 @@ class Port():
         else:
             self.gold -= port_maintenance   
             return ""
+        
+    def happiness_and_goods(self):
+        """
+        Function that recalculates the happiness level and the goods
+        
+        It is summoned by "turn()" and "end_round()".
+        """
+
+        ig = self.stock.imported_goods
+        happiness_change = 5/(1-1/len(ig)) # = 10*(len(ig)/2)/(len(ig)-1) so that, if half the goods're missing, the happiness doesn't decrease
+        all_foreign_goods = True
+        goods_change = -int(self.hinterland.population / 1_000_000 + 1) #so that, for every million, the goods gone in each turn increases by 1
+        for foreign_port, foreign_goods in ig.items():
+            if (foreign_goods + goods_change) < 0:
+                all_foreign_goods = False
+                self.stock.total_wealth-=ig[foreign_port]
+                ig[foreign_port] = 0
+                happiness_change+=-10/(len(ig)-1)
+            else:
+                ig[foreign_port]+=goods_change
+                self.stock.total_wealth+=goods_change
+        if all_foreign_goods:
+            #gets a little extra
+            happiness_change+=10/(len(ig)-1)
+        self.hinterland.happiness+=int(happiness_change)
+        
+        productivity_tax = self.hinterland.happiness / 100_000 #so that, at happiness=100, a 10_000 population gives 10 gold
+        self.gold+=int(round(productivity_tax*self.hinterland.population))
         
     def receive_goods(self, amount, port1):
         """Method to receive goods when a trade is called.
@@ -459,6 +493,8 @@ class MNM(cmd.Cmd):
 
         if self.round_index != 0: 
             self.message += self.current_port.maintenance_cost()
+            
+            self.current_port.happiness_and_goods()
         
         if self.current_port.hinterland.happiness<=0 and self.current_port.player!="Computer":
             self.current_port.hinterland.happiness=0
@@ -499,6 +535,7 @@ class MNM(cmd.Cmd):
             computer_port = self.fetch_port(computer_port_name)
             
             computer_port.maintenance_cost()
+            computer_port.happiness_and_goods()
                 
             try:
                 if computer_port.stock.total_wealth > 0.8 * computer_port.stock.max_stock:
@@ -535,31 +572,9 @@ class MNM(cmd.Cmd):
                         else:
                             pass
                 
-        self.message = computer_messages   
+        self.message = computer_messages
         
-        for port in self.ports:
-            ig = port.stock.imported_goods
-            happiness_change = 5/(1-1/len(ig)) # = 10*(len(ig)/2)/(len(ig)-1) so that, if half the goods're missing, the happiness doesn't decrease
-            all_foreign_goods = True
-            goods_change = -int(port.hinterland.population / 1_000_000 + 1) #so that, for every million, the goods gone in each turn increases by 1
-            for foreign_port, foreign_goods in ig.items():
-                if (foreign_goods + goods_change) < 0:
-                    all_foreign_goods = False
-                    port.stock.total_wealth-=ig[foreign_port]
-                    ig[foreign_port] = 0
-                    happiness_change+=-10/(len(ig)-1)
-                else:
-                    ig[foreign_port]+=goods_change
-                    port.stock.total_wealth+=goods_change
-            if all_foreign_goods:
-                #gets a little extra
-                happiness_change+=10/(len(ig)-1)
-            port.hinterland.happiness+=int(happiness_change)
-            
-            productivity_tax = port.hinterland.happiness / 100_000 #so that, at happiness=100, a 10_000 population gives 10 gold
-            port.gold+=int(round(productivity_tax*port.hinterland.population))
-        
-        self.round_index +=1 
+        self.round_index +=1
         
     def increase_stock_general(self, port, amount):
         """
