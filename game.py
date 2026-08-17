@@ -151,12 +151,25 @@ class Port():
     shipping_costs: int
         Dictionary of the cost to ship to other ports.
 
+    fee: int
+        Fee paid by the incoming ports.
+
+    queue: list
+        List of boats waiting to be handled by the port once it has enough stock.
+
     Methods:
     --------
     receive_goods()
         Adds the amount of foreign goods received to the port's stock.
-        
-
+    send_boat()
+        Creates a boat object and sends it to the destination port with a set amount of cargo.
+    handle_queue()
+        Loops throught the list of qeued ports and takes on their goods if the stock can handle it.
+        It then sends the boats back to their home ports with the port's own cargo.
+    maintenance_cost()
+        Function that applies maintenance cost
+    hapiness_and_goods()
+        Function that recalculates the happiness level and the goods
     """
     
     
@@ -293,6 +306,10 @@ class Port():
         
 
 class Boat():
+    """
+    A boat takes cargo from it's home port, heads to a destination port, waits in queue, 
+    loads the cargo with goods once it is handeled and heads back home.
+    """
     __slots__ = ('flag', 'destination', 'capacity', 'route', 'amount', 'cargo')
 
     def __init__(self, flag, destination, amount, cargo):
@@ -1025,7 +1042,7 @@ if __name__ == "__main__":
         if game.onecmd(command):
             break
 
-        if game.round_index==15:
+        if game.round_index==20:
             
             winner = None
             winner_gold = 0
