@@ -4,9 +4,12 @@ import argparse
 import random
 import sys
 import rasterio
+import json
+import statistics
 import geopandas as gpd
 import rioxarray as rioxr
-from shapely import Point, LineString, Polygon
+from PIL import Image, ImageDraw
+from shapely import Point, Polygon
 from shapely.ops import unary_union
 from skimage.graph import route_through_array
 from rasterio.transform import rowcol
@@ -41,6 +44,12 @@ except PermissionError:
 except OSError as e:
     print(f"OS error: {e}")
     
+ROUTE_COLORS = [
+    "#FF5733", "#33C1FF", "#8DFF33", "#FF33F6", "#FFD433",
+    "#33FFAA", "#B833FF", "#FF3383", "#33FFF6", "#B4FF33",
+    "#33FF57", "#F633FF"
+]
+    
 ###############################################################################
 #
 # Functions
@@ -53,6 +62,23 @@ def parse_point(pointstring):
     y = float(halves[1].rstrip(')')) # latitude
     point = Point(x,y)
     return point
+
+BASE_MAP = Image.open('assets/map_background.png').convert('RGBA') #AI
+LABELS_OVERLAY = Image.open('assets/map_overlay.png').convert('RGBA') #AI
+
+def render_frame(game, mnm_map, out_path='assets/map_frame.png'):
+    '''partially AI-Generated Function'''
+    frame = BASE_MAP.copy()
+    draw = ImageDraw.Draw(frame)
+
+    for route in game.active_routes:
+        pts = mnm_map.route_pixels(route[0], route[1])
+        draw.line(pts, fill=route[2], width=10)
+
+    # Labels/dots go on top, so routes never cover port names
+    frame = Image.alpha_composite(frame, LABELS_OVERLAY)
+    frame.convert('RGB').save(out_path)
+    return out_path
 
 ###############################################################################
 #
@@ -130,12 +156,11 @@ class Port():
     receive_goods()
         Adds the amount of foreign goods received to the port's stock.
         
-    send_goods()
-        Adds the amount of foreign goods received to the port's stock.
+
     """
     
     
-    __slots__ = ('name', 'player', 'gold', 'fee', 'coord', 'hinterland', 'stock', 'shipping_costs')
+    __slots__ = ('name', 'player', 'gold', 'fee', 'coord', 'hinterland', 'stock', 'shipping_costs', 'closest_port', 'queue')
 
     def __init__(self, name, player, gold, fee, coord, hinterland):
         self.name = name
@@ -145,8 +170,66 @@ class Port():
         self.fee = fee
         self.hinterland = hinterland
         self.stock = Stock(self.name)
-        self.shipping_costs = {}    
+        self.queue = []
+        self.shipping_costs = {}   
 
+    def send_boat(self, amount, destination_port, cargo):
+        """
+        Function that sends boats to other ports. If the destination port has enough stock to handle 
+        the sent goods, the boat drops it's goods and comes back immediatly. If the destination port
+        can't handle those goods because their stock is full, the boat will be added to the queue of 
+        boats waiting to drop their goods.
+        
+        It is summoned by "do_send()".
+
+        Parameters
+        ----------
+        amount : int
+            Amount of goods being traded
+
+        port2 : Port
+            Port that is receiving goods
+        """        
+        if self != destination_port:
+            boat = Boat(self, destination_port, amount, cargo)
+
+            if amount > boat.capacity:
+                raise Exception(f"You can't send {amount} to {destination_port.name} your boat's capacity is {self.boats[destination_port.name].capacity}")
+            
+            elif self.gold <= self.shipping_costs[destination_port.name]:
+                raise Exception(f"{self.name} tried to send a boat to {destination_port.name}, but it can't afford the journey!\n")
+            elif self.gold <= self.shipping_costs[destination_port.name] + destination_port.fee:
+                raise Exception(f"{self.name} tried to send a boat to {destination_port.name}, but it can't afford {destination_port.name}'s {destination_port.fee} fee!\n")
+                
+            self.gold -= (destination_port.fee + self.shipping_costs[destination_port.name])
+            destination_port.queue.append(boat)
+            
+            if cargo.player!="Computer":
+                game.active_routes.append((cargo.name, destination_port.name, game.port_colors[cargo.name]))
+                gui.set_map(render_frame(game, mnm_map))
+                
+            elif destination_port.player!="Computer":
+                game.active_routes.append((cargo.name, destination_port.name, game.port_colors[cargo.name]))
+            
+            return f"{self.name} sent their boat to get {amount} of {destination_port.name}'s goods. It is waiting in queue\n"
+
+        else:
+            return "You can't send boats to yourself!"
+
+    def handle_queue(self):
+        og_queue = self.queue.copy()
+        messages = ""
+        for boat in og_queue:
+            if self.stock.max_stock < (boat.amount + self.stock.total_wealth):
+                break
+            self.receive_goods(boat.amount, boat.cargo)
+            self.queue.remove(boat)
+            messages += f"{boat.flag.name}'s boat reached the {self.name} port and dropped {boat.amount} goods.\n"
+            if boat.flag.name != self.name:
+                boat.cargo = self
+                boat.flag.queue.append(boat)
+        return messages
+                
     def maintenance_cost(self):
         """
         Function that applies maintenance costs
@@ -203,29 +286,21 @@ class Port():
 
         port1: Port
             The port from which the foreign goods are being imported. 
-        """
-        
+        """           
         self.stock.imported_goods[port1.name] += amount
         self.stock.total_wealth += amount
         self.gold += self.fee
-
-    def send_goods(self, amount, port2):
-        """Method to send goods when a trade is called.
-
-        This method allows a port/player to send goods and to pay a fee in gold after they call a trade.
-
-        Parameters
-        ----------
-        amount: float
-            The amount of goods that is sent.
-
-        port2: Port
-            The port from which the foreign goods are gained during the trade. 
-        """
         
-        self.stock.imported_goods[port2.name] += amount
-        self.stock.total_wealth += amount
-        self.gold -= (port2.fee + self.shipping_costs[port2.name])
+
+class Boat():
+    __slots__ = ('flag', 'destination', 'capacity', 'route', 'amount', 'cargo')
+
+    def __init__(self, flag, destination, amount, cargo):
+        self.amount = amount
+        self.cargo = cargo
+        self.flag = flag
+        self.destination = destination
+        self.capacity = 5
     
     
 class Map():
@@ -248,7 +323,18 @@ class Map():
 
     Methods
     ----------
+        
+    find_routes()
+        calculates the shortest route from port1 to port2
+    
+    calc_shipping_costs()
+        calcukates the cost of travel from every port to every port and finds their nearest port
 
+    geo_to_pixel()
+        converts real coordinates to image pixels
+
+    route_pixels()
+        turns the real geographical routes into lines connected by pixels
 
     """
 
@@ -288,6 +374,13 @@ class Map():
         self.pop_gdf['area']= (self.pop_gdf.to_crs("EPSG:2062")).geometry.area / 10**6
         self.pop_gdf['pop'] = (self.pop_gdf['value'] * self.pop_gdf['area']).astype(int)
         
+        self.route_cache = {} #AI
+        with open('assets/map_bounds.json') as f: #AI
+            b = json.load(f) #AI
+        self.map_bounds = b #AI
+        self.img_w = b["img_w"] #AI
+        self.img_h = b["img_h"] #AI
+        
     def find_route(self, port1, port2):
         
         start_row, start_col = rowcol(self.pop_raster.rio.transform(), port1.coord.x, port1.coord.y) #AI
@@ -304,23 +397,58 @@ class Map():
         return(indices, int(weight-self.land_resistance))
     
     def calc_shipping_costs(self):
-
         for index1, port1 in enumerate(game.ports):
+            min_cost = 1_000_000
+            neighbour_port_name = ""
             for index2, port2 in enumerate(game.ports):
-                if index2 <= index1:
+                if index2 == index1:
                     continue
-                else:
-                    _, cost = self.find_route(port1, port2)
+                
+                elif index2 < index1:
+                    if port1.shipping_costs[port2.name] < min_cost:
+                        min_cost = port1.shipping_costs[port2.name]
+                        neighbour_port_name = port2.name
                     
+                    continue
+
+                else:
+                    indices, cost = self.find_route(port1, port2)
+                    self.route_cache[frozenset({port1.name, port2.name})] = indices  # NEW
+    
                     port1.shipping_costs[port2.name] = cost
-                    port2.shipping_costs[port1.name] = cost 
+                    port2.shipping_costs[port1.name] = cost
+                    
+                    if cost< min_cost:
+                        min_cost = cost
+                        neighbour_port_name = port2.name
+                        
+            port1.closest_port = game.fetch_port(neighbour_port_name)
+            
+    def geo_to_pixel(self, x, y):
+        '''AI-generated function'''
+        b = self.map_bounds
+        px = (x - b["left"]) / (b["right"] - b["left"]) * self.img_w
+        py = (b["top"] - y) / (b["top"] - b["bottom"]) * self.img_h
+        return (px, py)
+                    
+    def route_pixels(self, name1, name2):
+        """AI-generated function
+        convert a cached raster path into image pixel coordinates."""
+        indices = self.route_cache[frozenset({name1, name2})]
+        transform = self.pop_raster.rio.transform()
+        pts = []
+        for row, col in indices:
+            x, y = transform * (col + 0.5, row + 0.5)
+            pts.append(self.geo_to_pixel(x, y))
+        return pts
 
 
 class MNM(cmd.Cmd):
 
     __slots__ = ('n_players_og', 'n_players_real', 'n_rounds', 'ports',
                  'remaining_ports', 'player_count', 'turn_index', 'round_index',
-                 'message', 'current_turn', 'current_port', 'GAME_OVER')
+                 'message', 'current_turn', 'current_port', 'GAME_OVER',
+                 'port_colors', 'active_routes')
 
     def __init__(self, n_players):
         super().__init__()
@@ -334,6 +462,8 @@ class MNM(cmd.Cmd):
         self.round_index = 0
         self.message = ""
         self.GAME_OVER = False
+        self.port_colors = {}
+        self.active_routes = []
         
         for port in config["ports"]:
             self.remaining_ports.append(port)
@@ -393,6 +523,8 @@ class MNM(cmd.Cmd):
                                           )
                                )
                           )
+        
+        self.port_colors[port_name] = ROUTE_COLORS[len(self.ports) - 1]
     
     def choose_port(self, chosen_port_name):
         """
@@ -449,7 +581,7 @@ class MNM(cmd.Cmd):
         text = ""
 
         for port_key in port.stock.imported_goods:
-            text_list.append(f"{port_key} imported goods: {port.stock.imported_goods[port_key]}")
+            text_list.append(f"{port_key}: {port.stock.imported_goods[port_key]}")
 
         for item in text_list:
             text += f"{item}\n"    
@@ -463,7 +595,9 @@ class MNM(cmd.Cmd):
             )
         
         part2= (
-            f"Stock : {port.stock.total_wealth} / {port.stock.max_stock}\n"
+            f"Port Queue : {len(port.queue)}\n"
+            f"Stock : {port.stock.total_wealth} / {port.stock.max_stock}\n\n"
+            f"Imported goods list:\n"
             f"{text}\n\n"
             )
             
@@ -482,11 +616,17 @@ class MNM(cmd.Cmd):
         
         It moves the turn index into the next number and identifies the current player/port.
         If the turn before was the end of the round, it executes end_round().
+        Afterwards, deduces maintenance costs and recalculates happiness and goods.
+        If the happiness is 0, there's a chance the player will be deposed.
+        If so, from then on, that player's turn is skipped.
         """
         self.turn_index += 1
         self.current_turn = self.turn_index % self.n_players_og
         self.current_port = self.ports[self.current_turn]
         
+        self.active_routes = [r for r in self.active_routes if r[0] != self.current_port.name]
+        gui.set_map(render_frame(game, mnm_map))
+
         if self.turn_index!=0 and self.current_turn==0:
             #Computer time!!!
             self.end_round(self.round_index)
@@ -495,6 +635,9 @@ class MNM(cmd.Cmd):
             self.message += self.current_port.maintenance_cost()
             
             self.current_port.happiness_and_goods()
+            
+        if self.turn_index!=0 :
+            self.message += self.current_port.handle_queue()
         
         if self.current_port.hinterland.happiness<=0 and self.current_port.player!="Computer":
             self.current_port.hinterland.happiness=0
@@ -523,10 +666,11 @@ class MNM(cmd.Cmd):
         All the non-playable ports perform actions controlled by the computer:
             First, paying the port's maintenance cost.
             Second, if stock space is lacking, try to increase the stock.
-            Third, trading 2 units with all the ports whose goods are at low levels.
+            Third, adjust fees according to needs.
+            Fourth, trading.
+            Fifth, increase stock again, if necessary.
         All the messages that resulted from this process are aggregated and shown to the players at the beginning of the next turn.
-        After the computer actions, the happiness levels of every port (playable or not) are recalculated and the stored goods decrease.
-        Finally, the population pays their productivity tax depending on their happiness level.
+        After the computer actions, the game renders a new map with the relevant routes.
         """
         
         computer_messages = self.message
@@ -534,14 +678,16 @@ class MNM(cmd.Cmd):
             
             computer_port = self.fetch_port(computer_port_name)
             
+            self.active_routes = [r for r in self.active_routes if r[0] != computer_port_name]
+            
             computer_port.maintenance_cost()
             computer_port.happiness_and_goods()
+            computer_port.handle_queue()
                 
             try:
                 if computer_port.stock.total_wealth > 0.8 * computer_port.stock.max_stock:
                     self.increase_stock_general(computer_port, 10)
-                    print(f"{computer_port.name} increase stock to {computer_port.stock.max_stock}")
-                    #(self.increase_stock_general(computer_port, 10))
+                    #print(f"{computer_port.name} increase stock to {computer_port.stock.max_stock}")
             except Exception as e:
                 str(e)
                 
@@ -549,32 +695,58 @@ class MNM(cmd.Cmd):
                 computer_port.fee=0
             elif computer_port.gold<=200:
                 computer_port.fee+=50
-                
-            
-            temp_port_list = [temp_port for temp_port in self.ports if temp_port.name!=computer_port_name]
             
             cig = computer_port.stock.imported_goods
-            not_random_port = list(cig.items())
-            not_random_port= sorted(not_random_port, key=lambda tup: tup[1])
+            
+            if cig[computer_port.closest_port.name]<=1 and computer_port.closest_port.fee<100:
+                #always trade with the closest port if lacking their goods and they have an honest fee
+                try:
+                    if computer_port.closest_port.player != 'Computer':
+                        computer_messages+=computer_port.send_boat(5, computer_port.closest_port, computer_port)
+                        
+                    else:
+                        computer_port.send_boat(5, computer_port.closest_port, computer_port)
+                except Exception as e:
+                    if computer_port.closest_port.player != 'Computer':
+                        computer_messages+=str(e)
+                    else:
+                        pass
+            
+            not_random_port = list(cig.items()) #the name "not_random_port" is a joke, because it used to be a random port in an earlier version of the game
+            not_random_port = sorted(not_random_port, key=lambda tup: tup[1])
+            
+            minamount = int(not_random_port[0][1])
+            
+            min_list = [tup[0] for tup in not_random_port if tup[1]==minamount]
+            
+            fees_list = [(game.fetch_port(p_name)).fee for p_name in min_list]
+            median_fee = statistics.median(fees_list)                           
 
-            minamount = int(not_random_port[0][1])        
-
-            for p in temp_port_list:
-                if cig[p.name] == minamount:
+            for p_name in min_list:
+                p = game.fetch_port(p_name)
+                if p.fee<median_fee:
+                    #print(median_fee)
                     try:
                         if p.player != 'Computer':
-                            computer_messages+=self.trade_general(computer_port, 2, p)
+                            computer_messages+=computer_port.send_boat(5, p, computer_port)
                         else:
-                            self.trade_general(computer_port, 2, p)
+                            computer_port.send_boat(5, p, computer_port)
                     except Exception as e:
                         if p.player != 'Computer':
                             computer_messages+=str(e)
                         else:
                             pass
+                        
+            try:
+                if computer_port.stock.total_wealth > 0.8 * computer_port.stock.max_stock:
+                    self.increase_stock_general(computer_port, 10)
+                    #print(f"{computer_port.name} increase stock to {computer_port.stock.max_stock}")
+            except Exception as e:
+                str(e)
                 
         self.message = computer_messages
-        
         self.round_index +=1
+        gui.set_map(render_frame(game, mnm_map))
         
     def increase_stock_general(self, port, amount):
         """
@@ -599,6 +771,7 @@ class MNM(cmd.Cmd):
 
         port.stock.max_stock += amount
         port.gold -= 10*amount
+        port.handle_queue()
         self.message = f"{port.player} has increased the stock of {port.name} by {amount}.\n"
         return(self.message)
         
@@ -614,61 +787,22 @@ class MNM(cmd.Cmd):
         except Exception as e:
             self.message = str(e)
                 
-    def trade_general(self, port1, amount, port2):
+    def do_send(self, line):
         """
-        Function that executes trades between ports.
-        
-        It is summoned by "do_trade()".
-
-        Parameters
-        ----------
-        port1 : Port
-            Port that is sending goods
-
-        amount : int
-            Amount of goods being traded
-
-        port2 : Port
-            Port that is receiving goods
-        """
-
-        if port1 != port2:
-            
-            if port1.stock.max_stock <= ((amount + port1.stock.total_wealth) - 1):
-                raise Exception(f"{port1.name} tried to trade {amount}, but doesn't have enough stock!\n")
-            elif port2.stock.max_stock <= ((amount + port2.stock.total_wealth) - 1):
-                raise Exception(f"{port1.name} tried to trade with {port2.name}, but the {port2.name} port can't take {amount} goods!\n")
-            elif port1.gold <= port1.shipping_costs[port2.name]:
-                raise Exception(f"{port1.name} tried to trade with {port2.name}, but it can't afford the journey!\n")
-            elif port1.gold <= port1.shipping_costs[port2.name] + port2.fee:
-                raise Exception(f"{port1.name} tried to trade with {port2.name}, but it can't afford {port2.name}'s {port2.fee} fee!\n")
-                
-            port1.send_goods(amount, port2)
-            port2.receive_goods(amount, port1)
-            
-            self.message = f'{port1.name} traded {amount} goods with {port2.name}\n'
-            return(self.message) #returns message, so that it can be aggregated with other messages from the computer-controled ports
-        else:
-            raise Exception("You can't trade with yourself!")
-
-    def do_trade(self, line):
-        """
-        trade <amount> <port>
+        send <amount> <port>
         Executed if you have enough money to pay for the specified port's fees and the trip there.
         In that case, you'll give the stated amount of goods to the specified port.
-        In return, you'll receive the same amount of that port's goods
+        In return, you'll receive the same amount of that port's goods        
         """
         try:
             amount, port2_name = line.split()
-            port1 = self.current_port
+            port2 = self.fetch_port(port2_name) 
 
-            port2 = self.fetch_port(port2_name)
-            
             if port2 == None:
-                raise Exception(f"{port2_name} is not a valid name.")
+                raise Exception(f"{port2_name} is not a valid name.")  
 
-            self.trade_general(port1, int(amount), port2)
-            
+            self.message = self.current_port.send_boat(int(amount), port2, self.current_port)
+                      
         except Exception as e:
             self.message = str(e)
             
@@ -801,13 +935,16 @@ if __name__ == "__main__":
                        "Your goal is to become the most powerful trading hub in the Mediterranean Sea!\n"
                        "And you must also insure your population remains happy, by providing them with goods from every port!\n"
                        "The larger your population is and the happier they are, the higher your productivity revenue will be every turn!\n"
-                       "Beware, though: an unhappy population might try to depose their governor!\n"
-                       "Are you ready? How many people are playing?"
+                       "Beware, though: an unhappy population might try to depose their governor!"
                        )
     error_message = ""
     
     while gui.is_running() and n_players==None:
         gui.set_stats(initial_message+error_message, "Hello, governors!")
+        gui.set_message("Throughout the game, messages concerning the players will appear here.\n"+
+                        "The computer-controlled ports might trade between themselves, but the related messages will not be printed.\n"+
+                        "The same is true for the routes drawn on the map.\n"
+                        "Now, are you ready? How many people are playing?")
 
         gui.draw()
         
@@ -887,9 +1024,6 @@ if __name__ == "__main__":
 
         if game.onecmd(command):
             break
-
-        # Reload the map every turn.
-        gui.set_map("assets/map.png")
 
         if game.round_index==15:
             
