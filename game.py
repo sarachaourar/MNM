@@ -741,7 +741,7 @@ class MNM(cmd.Cmd):
 
             for p_name in min_list:
                 p = game.fetch_port(p_name)
-                if p.fee<median_fee:
+                if p.fee<median_fee or p.fee<1:
                     #print(median_fee)
                     try:
                         if p.player != 'Computer':
@@ -999,7 +999,6 @@ if __name__ == "__main__":
             extra_message+=f"Now, it's your turn, Player {game.player_count+1}.\n"
         
         pick_message = ("The map contains the list of port cities available to play.\n"
-                        f"Available ports : {game.remaining_ports}\n"+
                         "Type the name of an available port to pick it for yourself.")
 
         gui.set_stats(pick_message, f"Player {game.player_count+1}")
